@@ -19,7 +19,7 @@ from bluesky.stack.argparser import PosArg
 from bluesky.pathfinder import ResourcePath
 from bluesky.tools.misc import tim2txt
 from bluesky.network import subscriber, context as ctx
-from bluesky.network.common import get_ownip, seqidx2id, seqid2idx
+from bluesky.network.common import get_ownip, getseqidxfromid, genid
 import bluesky.network.sharedstate as ss
 
 from bluesky.ui import palette
@@ -418,7 +418,7 @@ class MainWindow(QMainWindow, Base):
                 ucount = 0
                 if ungrouped:
                     for node in ungrouped.takeChildren():
-                        if node.node_id[:-1] + seqidx2id(0) == server_id:
+                        if genid(node.node_id, seqidx=0) == server_id:
                             server.addChild(node)
                         else:
                             ungrouped.addChild(node)
@@ -433,14 +433,14 @@ class MainWindow(QMainWindow, Base):
     def nodesChanged(self, node_id):
         if node_id not in self.nodes:
             #print(node_id, 'added to list')
-            server_id = node_id[:-1] + seqidx2id(0)
+            server_id = genid(node_id, seqidx=0)
             if server_id not in bs.net.servers:
                 server_id = b'0'
             if server_id not in self.servers:
                 self.serversChanged(server_id)
             server = self.servers.get(server_id)
             server.setHidden(False)
-            node_num = seqid2idx(node_id[-1])
+            node_num = getseqidxfromid(node_id)
             node = QTreeWidgetItem(server)
             node.setText(0, f'{server.serv_num}:{node_num} <init>')
             node.setText(1, '00:00:00')

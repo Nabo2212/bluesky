@@ -8,7 +8,7 @@ from bluesky.core import Entity, Signal
 from bluesky.network import context as ctx
 from bluesky.network.subscriber import Subscription
 from bluesky.network.npcodec import encode_ndarray, decode_ndarray
-from bluesky.network.common import genid, asbytestr, seqidx2id, seqid2idx, MSG_SUBSCRIBE, MSG_UNSUBSCRIBE, GROUPID_NOGROUP, GROUPID_CLIENT, GROUPID_SIM, GROUPID_DEFAULT, IDLEN
+from bluesky.network.common import genid, zmq_msgid, asbytestr, getseqidxfromid, MSG_SUBSCRIBE, MSG_UNSUBSCRIBE, GROUPID_NOGROUP, GROUPID_CLIENT, GROUPID_SIM, GROUPID_DEFAULT, IDLEN
 
 
 # Register settings defaults
@@ -19,8 +19,9 @@ class Node(Entity):
     def __init__(self, group_id=None):
         super().__init__()
         self.node_id = genid(group_id or GROUPID_NOGROUP)
+        print('Created node with id', self.node_id, 'group', group_id)
         self.group_id = asbytestr(group_id or GROUPID_NOGROUP)[:len(self.node_id)-1]
-        self.server_id = self.node_id[:-1] + seqidx2id(0)
+        self.server_id = genid(self.node_id, seqidx=0)
         self.act_id = None
         self.nodes = set()
         self.servers = set()
@@ -125,7 +126,8 @@ class Node(Entity):
                     # this is also a registration message
                     if len(ctx.msg[0]) == IDLEN + 1:
                         sender_id = ctx.msg[0][1:]
-                        sequence_idx = seqid2idx(sender_id[-1])
+                        print('Received subscription message for', sender_id)
+                        sequence_idx = getseqidxfromid(sender_id)
                         if sender_id[0] in (GROUPID_SIM, GROUPID_NOGROUP):
                             # This is an initial simulation node subscription
                             if ctx.msg[0][0] == MSG_SUBSCRIBE:
@@ -150,11 +152,17 @@ class Node(Entity):
             return False
 
     def send(self, topic: str, data: str|Collection='', to_group: int|str|bytes=''):
-        btopic = asbytestr(topic)
-        bto_group = asbytestr(to_group or stack.sender() or '')
+        ''' Send data to the server.
+
+            Arguments:
+            - topic: The name of the topic to send
+            - data: The data to send. Can be a string, list/tuple, or dict.
+            - to_group: The group mask that this topic is sent to (optional)
+        '''
+        msgid = zmq_msgid(topic, self.node_id, to_group or stack.sender() or '')
         self.sock_send.send_multipart(
             [
-                bto_group.ljust(IDLEN, b'*') + btopic + self.node_id,
+                msgid,
                 msgpack.packb(data, default=encode_ndarray, use_bin_type=True)
             ]
         )
@@ -200,18 +208,12 @@ class Node(Entity):
     def _subscribe(self, topic, from_group: int|str|bytes=GROUPID_DEFAULT, to_group: int|str|bytes='', actonly=False):
         if from_group == GROUPID_DEFAULT:
             from_group = GROUPID_CLIENT
-        btopic = asbytestr(topic)
-        bfrom_group = asbytestr(from_group)
-        bto_group = asbytestr(to_group)
-        self.sock_recv.setsockopt(zmq.SUBSCRIBE, bto_group.ljust(IDLEN, b'*') + btopic + bfrom_group)
+        self.sock_recv.setsockopt(zmq.SUBSCRIBE, zmq_msgid(topic, from_group, to_group))
 
     def _unsubscribe(self, topic, from_group: int|str|bytes=GROUPID_DEFAULT, to_group: int|str|bytes=''):
         if from_group == GROUPID_DEFAULT:
             from_group = GROUPID_CLIENT
-        btopic = asbytestr(topic)
-        bfrom_group = asbytestr(from_group)
-        bto_group = asbytestr(to_group)
-        self.sock_recv.setsockopt(zmq.UNSUBSCRIBE, bto_group.ljust(IDLEN, b'*') + btopic + bfrom_group)
+        self.sock_recv.setsockopt(zmq.UNSUBSCRIBE, zmq_msgid(topic, from_group, to_group))
 
     def addnodes(self, count=1, *node_ids):
         ''' Tell the server to add 'count' nodes. 

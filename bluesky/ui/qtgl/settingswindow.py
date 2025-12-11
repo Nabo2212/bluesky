@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import QVBoxLayout, QScrollArea, QGroupBox, QWidget, \
         QListWidget, QListWidgetItem
 
 import bluesky as bs
-from bluesky.network.common import seqidx2id
+from bluesky.network.common import genid
 from bluesky.network.subscriber import subscribe
 import bluesky.network.sharedstate as ss
 from bluesky.core import Base
@@ -138,7 +138,7 @@ class SettingsWindow(QWidget, Base):
 
 
     def nodesChanged(self, node_id):
-        server_id = node_id[:-1] + seqidx2id(0)
+        server_id = genid(node_id, seqidx=0)
         server = self.servers.get(server_id)
         if not server:
             server = QTreeWidgetItem(self.nodetree)

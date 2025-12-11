@@ -1,7 +1,10 @@
 import socket
 import binascii
-from os import urandom
+import string
+# from os import urandom
+import random
 from enum import Enum, auto
+from click import group
 import msgpack
 
 
@@ -14,7 +17,9 @@ GROUPID_CLIENT = ord('C')
 GROUPID_SIM = ord('S')
 GROUPID_NOGROUP = ord('N')
 # Connection identifier string length
-IDLEN = 5
+IDLEN = 6
+IDXLEN = 2
+
 
 class ActionType(Enum):
     ''' Shared state action types. 
@@ -50,7 +55,7 @@ class MessageType(Enum):
     SharedState = auto()
 
 
-def genid(groupid: str|bytes|int='', idlen=IDLEN, seqidx=1):
+def genid(groupid: str|bytes|int='', idlen=IDLEN, idxlen=IDXLEN, seqidx=None):
     ''' Generate a binary identifier string 
     
         The identifier string consists of a group identifier of idlen-1 bytes,
@@ -65,14 +70,20 @@ def genid(groupid: str|bytes|int='', idlen=IDLEN, seqidx=1):
 
         - idlen: The length in bytes of the generated identifier string
 
+        - idxlen: The length in bytes of the sequence index part of the identifier
+
         - seqidx: The value of the sequence index part of this identifier.
     '''
     groupid = asbytestr(groupid)
-    if len(groupid) >= idlen:
-        return groupid
-    elif len(groupid) < idlen - 1:
-        groupid += urandom(idlen - 1 - len(groupid)).replace(b'*', b'_')
-    return groupid + seqidx2id(seqidx)
+    if len(groupid) >= idlen and seqidx is None:
+        # If no sequence index is requested, just return the groupid truncated to idlen
+        return groupid[:idlen]
+    groupid = groupid[:idlen - idxlen]
+
+    if len(groupid) < idlen - 1:
+        # groupid += urandom(idlen - 1 - len(groupid)).replace(b'*', b'_')
+        groupid += ''.join(random.choices(_allowed_id_chars, k=idlen - IDXLEN - len(groupid))).encode('charmap')
+    return groupid + seqidx2id(seqidx or 0)
 
 
 def ws_msgid(topic: str|bytes, from_group: int|str|bytes='', to_group: int|str|bytes=''):
@@ -118,17 +129,20 @@ def zmq_msgid(topic: str|bytes, from_group: int|str|bytes='', to_group: int|str|
     return bto_group.ljust(IDLEN, b'*') + btopic + bfrom_group
 
 
+def getseqidxfromid(nodeid: bytes):
+    ''' Get the sequence index from a node identifier string. '''
+    return int(nodeid[-2:], 16)
+
+
 def seqid2idx(seqid):
-    ''' Transform a bytestring sequence id to a numeric sequence index.
-        Returns -1 if this is not a valid sequence id.
+    ''' Transform a hexadecimal bytestring sequence id to a numeric sequence index.
     '''
-    ret = (seqid if isinstance(seqid, int) else ord(seqid)) - 128
-    return max(-1, ret)
+    return int(seqid, 16)
 
 
 def seqidx2id(seqidx):
-    ''' Transform a numeric sequence index to a bytestring sequence id '''
-    return chr(128 + seqidx).encode('charmap')
+    ''' Transform a numeric sequence index to a hexadecimal bytestring sequence id '''
+    return f'{seqidx:02x}'.encode('charmap')
 
 
 def asbytestr(val:int|str|bytes) -> bytes:
@@ -155,3 +169,5 @@ def get_ownip():
     except:
         pass
     return '127.0.0.1'
+
+_allowed_id_chars = string.ascii_letters + string.digits
