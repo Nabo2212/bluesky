@@ -1,8 +1,8 @@
 import socket
 import binascii
 from os import urandom
-from typing import Union
 from enum import Enum, auto
+import msgpack
 
 
 # Message headers (first byte): (un)subscribe
@@ -50,7 +50,7 @@ class MessageType(Enum):
     SharedState = auto()
 
 
-def genid(groupid: Union[str, bytes, int]='', idlen=IDLEN, seqidx=1):
+def genid(groupid: str|bytes|int='', idlen=IDLEN, seqidx=1):
     ''' Generate a binary identifier string 
     
         The identifier string consists of a group identifier of idlen-1 bytes,
@@ -73,6 +73,49 @@ def genid(groupid: Union[str, bytes, int]='', idlen=IDLEN, seqidx=1):
     elif len(groupid) < idlen - 1:
         groupid += urandom(idlen - 1 - len(groupid)).replace(b'*', b'_')
     return groupid + seqidx2id(seqidx)
+
+
+def ws_msgid(topic: str|bytes, from_group: int|str|bytes='', to_group: int|str|bytes=''):
+    ''' Generate a message identifier for publications to websocket connections.
+    
+        The message identifier is a msgpack-packed list consisting of the following parts:
+        - to_group (destination mask padded to IDLEN with '*' bytes)
+        - the publication topic
+        - from_group (sender mask for subscriptions, sender id for the actual publications)
+        - a trailing None value (to be replaced with the message payload)
+    '''
+    # TODO: bytes -> str or hex?
+    packed = msgpack.packb([from_group, topic, to_group, None])
+    if packed is not None:
+        return packed[:-1]
+
+def unpack_zmq_msgid(msgid: bytes):
+    ''' Unpack a zmq message identifier into its components.
+    
+        The message identifier is the concatenation of the following parts:
+        - to_group (destination mask padded to IDLEN with '*' bytes)
+        - the publication topic
+        - from_group (sender mask for subscriptions, sender id for the actual publications)
+
+        Returns a tuple of (topic, from_group, to_group).
+    '''
+    btopic = msgid[IDLEN:-IDLEN].decode()
+    bfrom_group = msgid[-IDLEN:]
+    bto_group = msgid[:IDLEN]
+    return (btopic, bfrom_group, bto_group)
+
+def zmq_msgid(topic: str|bytes, from_group: int|str|bytes='', to_group: int|str|bytes=''):
+    ''' Generate a message identifier for publications to ZMQ connections.
+    
+        The message identifier is the concatenation of the following parts:
+        - to_group (destination mask padded to IDLEN with '*' bytes)
+        - the publication topic
+        - from_group (sender mask for subscriptions, sender id for the actual publications)
+    '''
+    btopic = asbytestr(topic)
+    bto_group = asbytestr(to_group)
+    bfrom_group = asbytestr(from_group)
+    return bto_group.ljust(IDLEN, b'*') + btopic + bfrom_group
 
 
 def seqid2idx(seqid):
