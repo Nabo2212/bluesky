@@ -219,7 +219,7 @@ def initbasecmds():
         "FIXDT": [
             "FIXDT ON/OFF [tend]",
             "onoff,[time]",
-            lambda flag, *args: bs.sim.ff(*args) if flag else bs.op(),
+            lambda flag, *args: bs.sim.fastforward(*args) if flag else bs.sim.op(),
             "Legacy function for TMX compatibility",
         ],
 
