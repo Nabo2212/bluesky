@@ -26,20 +26,19 @@ traf = None
 navdb = None
 sim = None
 scr = None
-server = None
 
 
-def init(mode='sim', configfile=None, scenfile=None, discoverable=False,
-         gui=None, detached=False, workdir=None, group_id=None, **kwargs):
+def init(mode='sim', gui=None, configfile='', scenfile=None, group_id=None, **kwargs):
     ''' Initialize bluesky modules.
 
         Arguments:
         - mode: Running mode of this bluesky process [sim/client/server]
+        - gui: Gui type (only when mode is client or server) [qtgl/pygame/console]
+
         - configfile: Load a different configuration file [filename]
         - scenfile: Start with a running scenario [filename]
-        - discoverable: Make server discoverable through UDP (only relevant
+        - enable_discovery: Make server discoverable through UDP (only relevant
           when this process is running a server) [True/False]
-        - gui: Gui type (only when mode is client or server) [qtgl/pygame/console]
         - detached: Run with or without networking (only when mode is sim) [True/False]
         - workdir: Pass a custom working directory (instead of cwd or ~/bluesky)
         - group_id: Explicitly set (part of) the connection identifier string.
@@ -51,28 +50,29 @@ def init(mode='sim', configfile=None, scenfile=None, discoverable=False,
         'Possible modes are sim, client, and server.'
     assert gui in (None, 'qtgl', 'pygame', 'console'), f'BlueSky init: Unrecognised gui type {gui}. '\
         'Possible types are qtgl, pygame, and console.'
-    if discoverable:
+    if kwargs.get('enable_discovery', False):
         assert mode == 'server', 'BlueSky init: Discoverable can only be set in server mode.'
     if scenfile:
         assert mode != 'client', 'BlueSky init: Scenario file cannot be passed to a client.'
     if gui:
         assert mode != 'sim' or gui == 'pygame', 'BlueSky init: Gui type shouldn\'t be specified in sim mode.'
-    if detached:
+    if kwargs.get('detached', False):
         assert mode == 'sim', 'BlueSky init: Detached operation is only available in sim mode.'
 
     # Keep track of mode and gui type.
     globals()['mode'] = mode
     globals()['gui'] = gui
 
-    global server, traf, sim, scr, net, navdb
+    global traf, sim, scr, net, navdb
 
     # Initialise resource localisation, and set custom working directory if present
     from bluesky import pathfinder
-    pathfinder.init(workdir)
+    pathfinder.init(kwargs.get('workdir'))
 
     # Initialize global settings, possibly loading a custom config file
     from bluesky import settings
     settings.init(configfile)
+    settings.update_from_dict(kwargs)
 
     from bluesky import stack, tools
 
@@ -90,11 +90,6 @@ def init(mode='sim', configfile=None, scenfile=None, discoverable=False,
         from bluesky.navdatabase import Navdatabase
         navdb = Navdatabase()
 
-    # If mode is server-gui or server-headless start the networking server
-    if mode == 'server':
-        from bluesky.network.server import Server
-        server = Server(discoverable, configfile, scenfile, workdir)
-
     # The remaining objects are only instantiated in the sim nodes
     if mode == 'sim':
         from bluesky.traffic import Traffic
@@ -104,7 +99,7 @@ def init(mode='sim', configfile=None, scenfile=None, discoverable=False,
             from bluesky.network.detached import Node
         else:
             from bluesky.simulation import ScreenIO as Screen
-            if detached:
+            if kwargs.get('detached', False):
                 from bluesky.network.detached import Node
             else:
                 from bluesky.network.node import Node

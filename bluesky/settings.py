@@ -55,6 +55,11 @@ def init(cfgfile=''):
     return True
 
 
+def update_from_dict(kwargs):
+    ''' Update settings from passed keyword arguments dictionary. '''
+    globals().update(kwargs)
+
+
 _settings_hierarchy = dict()
 _settings = list()
 def set_variable_defaults(**kwargs):
@@ -76,17 +81,19 @@ def set_variable_defaults(**kwargs):
             _settings.append(key)
 
     # Keep track of who this variable belongs to
-    callertree = inspect.currentframe().f_back.f_globals['__name__'].split('.')
-    tree = _settings_hierarchy
-    visited = set()
-    for loc in callertree:
-        if loc in visited:
-            continue
-        if loc not in tree:
-            tree[loc] = dict()
-        tree = tree[loc]
-        visited.add(loc)
-    tree.update(kwargs)
+    frame = inspect.currentframe()
+    if frame is not None and frame.f_back is not None:
+        callertree = frame.f_back.f_globals['__name__'].split('.')
+        tree = _settings_hierarchy
+        visited = set()
+        for loc in callertree:
+            if loc in visited:
+                continue
+            if loc not in tree:
+                tree[loc] = dict()
+            tree = tree[loc]
+            visited.add(loc)
+        tree.update(kwargs)
 
 def save(fname=None, changes=None):
     ''' Save BlueSky configuration to file. '''

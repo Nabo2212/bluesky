@@ -1,17 +1,16 @@
-''' Server test '''
 import sys
 import signal
-from subprocess import Popen
 from multiprocessing import cpu_count
-from threading import Thread
-
+import asyncio
+from typing import Any
 import zmq
+import zmq.asyncio
 import msgpack
 
 import bluesky as bs
 from bluesky.network.npcodec import encode_ndarray
 from bluesky.network.discovery import Discovery
-from bluesky.network.common import genid, bin2hex, MSG_SUBSCRIBE, MSG_UNSUBSCRIBE, GROUPID_SIM, IDLEN
+from bluesky.network.common import genid, zmq_msgid, bin2hex, MSG_SUBSCRIBE, MSG_UNSUBSCRIBE, GROUPID_SIM, IDLEN
 
 
 # Register settings defaults
@@ -29,10 +28,8 @@ def split_scenarios(scentime, scencmd):
             start = i
 
 
-class Server(Thread):
-    ''' Implementation of the BlueSky simulation server. '''
+class Server:
     def __init__(self, altconfig=None, startscn=None, workdir=None):
-        super().__init__()
         self.spawned_processes = dict()
         self.running = True
         self.max_nnodes = min(cpu_count(), bs.settings.max_nnodes)
@@ -53,74 +50,132 @@ class Server(Thread):
         else:
             self.discovery = None
 
-        # Get ZMQ context
-        ctx = zmq.Context.instance()
+        # Get context and initialize sockets and poller
+        ctx = zmq.asyncio.Context()
         self.sock_recv = ctx.socket(zmq.XSUB)
         self.sock_send = ctx.socket(zmq.XPUB)
-        self.poller = zmq.Poller()
+        self.poller = zmq.asyncio.Poller()
 
     def quit(self):
+        ''' Quit the server loop. '''
+        print('Quit signal received')
         self.running = False
 
-    def sendscenario(self, node_id):
+    async def _spawn_single(self, node_id, startscn=None):
+        ''' Spawn a single node with given node_id. '''
+        newid = genid(node_id)
+        args = [sys.executable, '-m', 'bluesky', '--sim', '--groupid', bin2hex(newid)]
+        if self.altconfig:
+            args.extend(['--configfile', self.altconfig])
+        if self.workdir:
+            args.extend(['--workdir', self.workdir])
+        if startscn:
+            args.extend(['--scenfile', startscn])
+        return newid, await asyncio.subprocess.create_subprocess_exec(*args)
+
+    async def addnodes(self, count=1, node_ids=None, startscn=None):
+        ''' Add [count] nodes to this server. '''
+        self.spawned_processes.update({
+            newid:proc for newid, proc in await asyncio.gather(
+                *(self._spawn_single(node_id=(
+                    node_ids[idx] if node_ids else self.server_id[:-1]
+                ), startscn=startscn) for idx in range(count))
+            )
+        })
+
+    async def sendscenario(self, node_id):
         # Send a new scenario to the target sim process
         scen = self.scenarios.pop(0)
-        self.send(b'BATCH', scen, node_id)
+        await self.send(b'BATCH', scen, node_id)
 
-    def addnodes(self, count=1, node_ids=None, startscn=None):
-        ''' Add [count] nodes to this server. '''
-        for idx in range(count):
-            if node_ids:
-                newid = genid(node_ids[idx])
-            else:
-                self.max_group_idx += 1
-                newid = genid(self.server_id[:-1], seqidx=self.max_group_idx)
-            args = [sys.executable, '-m', 'bluesky', '--sim', '--groupid', bin2hex(newid)]
-            if self.altconfig:
-                args.extend(['--configfile', self.altconfig])
-            if self.workdir:
-                args.extend(['--workdir', self.workdir])
-            if startscn:
-                args.extend(['--scenfile', startscn])
-            self.spawned_processes[newid] = Popen(args)
+    async def send(self, topic, data: Any='', to_group=b'', sender_id: str|bytes=b''):
+        ''' Send data originating from the server to the specified destination.
 
-    def send(self, topic, data='', dest=b''):
-        self.sock_send.send_multipart(
-            [
-                dest.ljust(IDLEN, b'*') + topic + self.server_id,
-                msgpack.packb(data, default=encode_ndarray, use_bin_type=True)
-            ]
-        )
+            Arguments:
+            - topic: The publication topic
+            - data: The data to send
+            - to_group: The destination mask. If empty, broadcast to all.
+            - sender_id: The id of the sending node. If empty, use server id.
+        '''
+        msgid = zmq_msgid(topic, to_group=to_group, from_group=sender_id or self.server_id)
+        packed = msgpack.packb(data, default=encode_ndarray, use_bin_type=True)
+        if packed is not None:
+            await self.forward(msgid, packed)
 
-    def run(self):
-        ''' The main loop of this server. '''
-        print(f'Starting server with id', self.server_id)
-        # For the server, send/recv ports are reversed
+    async def forward(self, msgid: bytes, data: bytes):
+        await self.sock_send.send_multipart([msgid, data])
+
+    def run(self, threaded=False):
+        ''' Run the server loop. '''
+        asyncio.run(self.loop())
+
+    async def subscribe(self, msgid: bytes):
+        ''' Send subscribe request on the recv socket.
+
+            Arguments:
+            - msgid: The message identifier to subscribe to
+              This is a zmq_msgid, so a concatenation of:
+                - to_group (destination mask padded to IDLEN with '*' bytes)
+                - the publication topic
+                - from_group (sender mask for subscriptions, sender id for the actual publications)
+        '''
+        await self.sock_recv.send_multipart([b'\x01' + msgid])
+
+    async def unsubscribe(self, msgid: bytes):
+        ''' Send unsubscribe request on the recv socket.
+
+            Arguments:
+            - msgid: The message identifier to unsubscribe from
+            This is a zmq_msgid, so a concatenation of:
+                - to_group (destination mask padded to IDLEN with '*' bytes)
+                - the publication topic
+                - from_group (sender mask for subscriptions, sender id for the actual publications)
+        '''
+        await self.sock_recv.send_multipart([b'\x00' + msgid])
+
+    async def register_node(self, node_id: bytes):
+        ''' Register a simulation node with this server.
+
+            Arguments:
+            - node_id: The id of the node to register
+        '''
+        # This is an initial client, server, or node subscription
+        if node_id[0] == GROUPID_SIM and node_id in self.spawned_processes:
+            # This is a node owned by this server which has successfully started.
+            self.sim_nodes.add(node_id)
+            await self.send(b'REQUEST', ['STATECHANGE'], node_id)
+    
+    async def unregister_node(self, node_id: bytes):
+        ''' Unregister a simulation node from this server.
+
+            Arguments:
+            - node_id: The id of the node to unregister
+        '''
+        print('Removing node', node_id)
+        self.sim_nodes.discard(node_id)
+
+    async def loop(self):
+        ''' Main server loop. '''
         self.sock_recv.bind(f'tcp://*:{bs.settings.send_port}')
         self.sock_send.bind(f'tcp://*:{bs.settings.recv_port}')
-
-
-        # Create poller for pub/sub and discovery
         self.poller.register(self.sock_recv, zmq.POLLIN)
         self.poller.register(self.sock_send, zmq.POLLIN)
+
+        print(f'BlueSky Simulation Server started with ID {bin2hex(self.server_id)}')
+        print(f'Listening for clients on ports {bs.settings.recv_port} (recv) and {bs.settings.send_port} (send)')
 
         if self.discovery:
             self.poller.register(self.discovery.handle, zmq.POLLIN)
         print(f'Discovery is {"en" if self.discovery else "dis"}abled')
 
         # Create subscription for messages targeted at this server
-        self.sock_recv.send_multipart([b'\x01' + self.server_id])
+        await self.sock_recv.send_multipart([b'\x01' + self.server_id])
 
         # Start the first simulation node
-        self.addnodes(startscn=self.startscn)
+        await self.addnodes(startscn=self.startscn)
 
         while self.running:
-            try:
-                events = dict(self.poller.poll(None))
-            except zmq.ZMQError:
-                print('ERROR while polling')
-                break  # interrupted
-
+            events = dict(await self.poller.poll())
             # The socket with incoming data
             for sock, event in events.items():
                 if event != zmq.POLLIN:
@@ -137,8 +192,7 @@ class Server(Thread):
                             bs.settings.send_port)
                     continue
 
-                # Receive the message
-                msg = sock.recv_multipart()
+                msg = await sock.recv_multipart()
                 if not msg:
                     # In the rare case that a message is empty, skip remaning processing
                     continue
@@ -147,16 +201,13 @@ class Server(Thread):
                     # this is also a registration message
                     if len(msg[0]) == IDLEN + 1:
                         if msg[0][0] == MSG_SUBSCRIBE:
-                            # This is an initial client, server, or node subscription
-                            if msg[0][1] == GROUPID_SIM and msg[0][1:] in self.spawned_processes:
-                                # This is a node owned by this server which has successfully started.
-                                self.sim_nodes.add(msg[0][1:])
-                                self.send(b'REQUEST', ['STATECHANGE'], msg[0][1:])
-                        elif msg[0][0] == MSG_UNSUBSCRIBE and msg[0][1] == GROUPID_SIM and msg[0][1:] in self.spawned_processes:
-                            print('Removing node', msg[0][1:])
-                            self.sim_nodes.discard(msg[0][1:])
-                    # Always forward
-                    self.sock_recv.send_multipart(msg)
+                            await self.register_node(msg[0][1:])
+                            
+                        elif msg[0][0] == MSG_UNSUBSCRIBE:
+                            await self.unregister_node(msg[0][1:])
+                    # Always forward to zmq publishers
+                    await self.sock_recv.send_multipart(msg)
+
                 elif sock == self.sock_recv:
                     # First check if message is directed at this server
                     if msg[0].startswith(self.server_id):
@@ -167,9 +218,9 @@ class Server(Thread):
                             self.quit()
                         elif topic == b'ADDNODES':
                             if isinstance(data, int):
-                                self.addnodes(count=data)
+                                await self.addnodes(count=data)
                             elif isinstance(data, dict):
-                                self.addnodes(**data)
+                                await self.addnodes(**data)
                         elif topic == b'STATECHANGE':
                             state = data[1]['simstate']
                             if state < bs.OP:
@@ -177,7 +228,7 @@ class Server(Thread):
                                 # the simulation node a new scenario, otherwise store it in
                                 # the available simulation node list
                                 if self.scenarios:
-                                    self.sendscenario(sender_id)
+                                   await  self.sendscenario(sender_id)
                                 else:
                                     self.avail_nodes.add(sender_id)
                             else:
@@ -193,28 +244,27 @@ class Server(Thread):
                                 # Send scenario to available nodes (nodes that are in init or hold mode):
                                 while self.avail_nodes and self.scenarios:
                                     node_id = next(iter(self.avail_nodes))
-                                    self.sendscenario(node_id)
+                                    await self.sendscenario(node_id)
                                     self.avail_nodes.discard(node_id)
 
                                 # If there are still scenarios left, determine and
                                 # start the required number of local nodes
                                 reqd_nnodes = min(len(self.scenarios), max(0, self.max_nnodes - len(self.sim_nodes)))
-                                self.addnodes(reqd_nnodes)
+                                await self.addnodes(reqd_nnodes)
                             # ECHO the results to the calling client
-                            topic = b'ECHO'
-                            data = msgpack.packb(dict(text=echomsg, flags=0), use_bin_type=True)
-                            self.sock_send.send_multipart([sender_id + topic + self.server_id, data])
+                            await self.send('ECHO', dict(text=echomsg, flags=0), sender_id)
+
                     else:
-                        self.sock_send.send_multipart(msg)
+                        await self.forward(*msg)
         print('Server quit. Stopping nodes:')
-        for pid, p in self.spawned_processes.items():
-            # print('Stopping node:', pid, end=' ')
-            # p.send_signal(signal.SIGTERM)
-            p.terminate()
-            p.wait()
-            # Inform network that node is removed
-            self.sock_recv.send_multipart([b'\x00' + pid])
-            # print('done')
+
+        # Terminate all spawned processes
+        for proc in self.spawned_processes.values():
+            proc.terminate()
+        await asyncio.gather(*(
+            [proc.wait() for proc in self.spawned_processes.values()] +
+            [self.sock_recv.send_multipart([b'\x00' + pid]) for pid in self.spawned_processes.keys()]
+            ))
         print('Closing connections:', end=' ')
         self.poller.unregister(self.sock_recv)
         self.poller.unregister(self.sock_send)
@@ -222,7 +272,6 @@ class Server(Thread):
         self.sock_send.close()
         zmq.Context.instance().destroy()
         print('done')
-
 
 def start(threaded=False, **kwargs):
     server = Server(kwargs.get('altconfig'), kwargs.get('startscn'), kwargs.get('workdir'))
@@ -232,10 +281,7 @@ def start(threaded=False, **kwargs):
     signal.signal(signal.SIGTERM, lambda *args: server.quit())
 
     # Run the server loop
-    if threaded:
-        server.start()
-    else:
-        server.run()
+    server.run(threaded)
 
 
 if __name__ == '__main__':

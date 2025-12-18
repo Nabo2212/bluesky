@@ -13,7 +13,7 @@ def parse():
                 namespace.gui = gui
                 namespace.hostname = values or None
                 if discoverable is not None:
-                    namespace.discoverable = discoverable
+                    namespace.enable_discovery = discoverable
                 if detached is not None:
                     namespace.detached = detached
 
@@ -46,7 +46,7 @@ def parse():
     scnparse.add_argument("--scenfile", dest="scenfile",
                         help="Load scenario file on startup.")
 
-    parser.add_argument("--discoverable", dest="discoverable", action="store_const", const=True,
+    parser.add_argument("--discoverable", dest="enable_discovery", action="store_const", const=True,
                         default=False, help="Make simulation server discoverable. (Default in headless mode).")
     
     parser.add_argument("--workdir", dest="workdir",

@@ -46,10 +46,11 @@ def main():
 
         # Start server if server/gui or server-headless is started here
         if bs.mode == 'server':
-            if bs.gui is None:
-                bs.server.run()
-            else:
-                bs.server.start()
+            # If mode is server-gui or server-headless start the networking server
+            threaded = (bs.gui is not None)
+            from bluesky.network import server
+            # from bluesky.network import server_async as server
+            server.start(threaded, **args)
 
         # Start gui if client or main server/gui combination is started here
         if bs.gui == 'qtgl':
