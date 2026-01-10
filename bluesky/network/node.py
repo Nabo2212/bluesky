@@ -19,7 +19,6 @@ class Node(Entity):
     def __init__(self, group_id=None):
         super().__init__()
         self.node_id = genid(group_id or GROUPID_NOGROUP)
-        print('Created node with id', self.node_id, 'group', group_id)
         self.group_id = asbytestr(group_id or GROUPID_NOGROUP)[:len(self.node_id)-1]
         self.server_id = genid(self.node_id, seqidx=0)
         self.act_id = None
@@ -126,7 +125,6 @@ class Node(Entity):
                     # this is also a registration message
                     if len(ctx.msg[0]) == IDLEN + 1:
                         sender_id = ctx.msg[0][1:]
-                        print('Received subscription message for', sender_id)
                         sequence_idx = getseqidxfromid(sender_id)
                         if sender_id[0] in (GROUPID_SIM, GROUPID_NOGROUP):
                             # This is an initial simulation node subscription
