@@ -217,7 +217,7 @@ class Simulation(Base):
         plotter.reset()
 
         # Communicate that this simulation has reset
-        bs.net.send(b'RESET')
+        bs.net.send('RESET')
 
     def set_dtmult(self, mult):
         ''' Set simulation speed multiplier. '''
@@ -250,7 +250,7 @@ class Simulation(Base):
         self.reset()
         try:
             scentime, scencmd = zip(*[tc for tc in simstack.readscn(fname, sort=False)])
-            bs.net.send(b'BATCH', (scentime, scencmd), bs.net.server_id)
+            bs.net.send('BATCH', (scentime, scencmd), bs.net.server_id)
         except FileNotFoundError:
             return False, f'BATCH: File not found: {fname}'
 

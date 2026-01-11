@@ -38,10 +38,10 @@ class ConsoleClient(Client):
     '''
     modes = ['Init', 'Hold', 'Operate', 'End']
 
-    def __init__(self, actnode_topics=b''):
+    def __init__(self, actnode_topics=''):
         super().__init__(actnode_topics)
-        self.subscribe(b'SIMINFO').connect(self.on_siminfo_received)
-        self.subscribe(b'ACDATA').connect(self.on_acdata_received)
+        self.subscribe('SIMINFO').connect(self.on_siminfo_received)
+        self.subscribe('ACDATA').connect(self.on_acdata_received)
         
         self.count = 0
         self.nodes = dict()

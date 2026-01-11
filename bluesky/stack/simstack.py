@@ -242,7 +242,7 @@ def merge(source, *args, isrelative=True):
 
 
 @command(annotations='string')
-def echo(text='', flags=0, to_group=b''):
+def echo(text='', flags=0, to_group=''):
         ''' Echo
 
             Simulation-side implementation of ECHO sends echo message on to client.    
@@ -253,7 +253,7 @@ def echo(text='', flags=0, to_group=b''):
 @command(name='INSEDIT')
 def cmdline(text: 'string'):
     ''' Insert text op edit line in command window. '''
-    bs.net.send(b'CMDLINE', text)
+    bs.net.send('CMDLINE', text)
 
 
 @command(aliases=('LOAD', 'OPEN'))

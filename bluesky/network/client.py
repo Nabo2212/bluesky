@@ -79,4 +79,8 @@ class Client(Node):
             If no server_id is specified, the corresponding server of the
             currently-active node is targeted.
         '''
-        self.send('ADDNODES', dict(count=count, node_ids=node_ids), server_id or genid(self.act_id[:-1], seqidx=0))
+        if server_id is None and self.act_id is not None:
+            server_id = genid(self.act_id, seqidx=0)
+
+        if server_id is not None:
+            self.send('ADDNODES', dict(count=count, node_ids=node_ids), server_id)

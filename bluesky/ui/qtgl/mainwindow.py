@@ -357,7 +357,8 @@ class MainWindow(QMainWindow, Base):
             self.running = False
             # Send quit to server if we own it
             if self.mode != 'client':
-                bs.net.send(b'QUIT', to_group=bs.server.server_id)
+                for server_id in self.servers.keys():
+                    bs.net.send('QUIT', to_group=server_id)
             app.instance().closeAllWindows()
             # return True
 
@@ -395,11 +396,11 @@ class MainWindow(QMainWindow, Base):
             self.maxservnum += 1
             server.serv_num = self.maxservnum
             server.server_id = server_id
-            hostname = 'Ungrouped' if server_id == b'0' else 'This computer'
+            hostname = 'Ungrouped' if server_id == '0' else 'This computer'
             f = server.font(0)
             f.setBold(True)
             server.setExpanded(True)
-            if server_id != b'0':
+            if server_id != '0':
                 btn = QPushButton(self.nodetree)
                 btn.server_id = server_id
                 btn.setText(hostname)
@@ -407,14 +408,14 @@ class MainWindow(QMainWindow, Base):
                 btn.setStyleSheet('font-weight:bold')
                 icon = bs.resource(bs.settings.gfx_path) / 'icons/addnode.svg'
                 btn.setIcon(QIcon(icon.as_posix()))
-                btn.setIconSize(QSize(40 if server_id == b'0' else 24, 16))
+                btn.setIconSize(QSize(40 if server_id == '0' else 24, 16))
                 btn.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
                 btn.setMaximumHeight(16)
                 btn.clicked.connect(self.buttonClicked)
                 self.nodetree.setItemWidget(server, 0, btn)
 
                 # Move nodes from ungrouped if they belong to this server
-                ungrouped: QTreeWidgetItem = self.servers.get(b'0')
+                ungrouped: QTreeWidgetItem = self.servers.get('0')
                 ucount = 0
                 if ungrouped:
                     for node in ungrouped.takeChildren():
@@ -435,7 +436,7 @@ class MainWindow(QMainWindow, Base):
             #print(node_id, 'added to list')
             server_id = genid(node_id, seqidx=0)
             if server_id not in bs.net.servers:
-                server_id = b'0'
+                server_id = '0'
             if server_id not in self.servers:
                 self.serversChanged(server_id)
             server = self.servers.get(server_id)
@@ -525,7 +526,7 @@ class MainWindow(QMainWindow, Base):
         elif self.sender() == self.action_Save:
             stack.stack('SAVEIC')
         elif hasattr(self.sender(), 'server_id'):
-            bs.net.send(b'ADDNODES', 1, self.sender().server_id)
+            bs.net.send('ADDNODES', 1, self.sender().server_id)
 
     def show_file_dialog(self, path=None):
         # Due to Qt5 bug in Windows, use temporarily Tkinter

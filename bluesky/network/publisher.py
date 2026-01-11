@@ -84,7 +84,7 @@ class StatePublisher(metaclass=PublisherMeta):
         ''' Default payload function returns None '''
         return
 
-    def send_update(self, to_group=b'', **data):
+    def send_update(self, to_group='', **data):
         data = data or self.get_payload()
         if data:
             if self.collects:
@@ -93,12 +93,12 @@ class StatePublisher(metaclass=PublisherMeta):
                 bs.net.send(self.topic, [ActionType.Update.value, data], to_group)
 
 
-    def send_delete(self, to_group=b'', **keys):
+    def send_delete(self, to_group='', **keys):
         if keys:
             bs.net.send(self.topic, [ActionType.Delete.value, keys], to_group)
 
 
-    def send_append(self, to_group=b'', **data):
+    def send_append(self, to_group='', **data):
         data = data or self.get_payload()
         if data:
             if self.collects:
@@ -106,7 +106,7 @@ class StatePublisher(metaclass=PublisherMeta):
             else:
                 bs.net.send(self.topic, [ActionType.Append.value, data], to_group)
 
-    def send_extend(self, to_group=b'', **data):
+    def send_extend(self, to_group='', **data):
         data = data or self.get_payload()
         if data:
             if self.collects:
@@ -114,7 +114,7 @@ class StatePublisher(metaclass=PublisherMeta):
             else:
                 bs.net.send(self.topic, [ActionType.Extend.value, data], to_group)
 
-    def send_replace(self, to_group=b'', **data):
+    def send_replace(self, to_group='', **data):
         data = data or self.get_payload()
         if data:
             bs.net.send(self.topic, [ActionType.Replace.value, data], to_group)

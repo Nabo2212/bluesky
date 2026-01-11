@@ -18,7 +18,7 @@ def plot(*args, **params):
             plots.append(newplot)
         except IndexError as e:
             return False, e.args[0]
-    bs.net.send(b'PLOT', dict(show=True), (bs.stack.sender() or b'*'))
+    bs.net.send('PLOT', dict(show=True), (bs.stack.sender() or '*'))
     return True
 
 
@@ -30,7 +30,7 @@ def legend(legend, fig=None):
             plot for plot in plots if plot.fig == str(fig))
 
         data = {p.fig: dict(legend=legend)}
-        bs.net.send(b'PLOT', data, to_group=p.to_group)
+        bs.net.send('PLOT', data, to_group=p.to_group)
         return True
     except (IndexError, StopIteration) as e:
         return False, e.args[0]
@@ -40,7 +40,7 @@ def reset():
     # Notify clients of removal of plots
     notify_ids = {p.to_group for p in plots}
     for to_group in notify_ids:
-        bs.net.send(b'PLOT', dict(reset=True), to_group)
+        bs.net.send('PLOT', dict(reset=True), to_group)
     plots.clear()
 
 
@@ -53,7 +53,7 @@ def update():
             streamdata[p.to_group][p.fig] = dict(x=p.x.get(), y=p.y.get())
 
     for to_group, data in streamdata.items():
-        bs.net.send(b'PLOT', data, to_group)
+        bs.net.send('PLOT', data, to_group)
 
 
 class Plot:
@@ -77,14 +77,14 @@ class Plot:
 
         self.fig = str(fig)
 
-        self.to_group = (bs.stack.sender() or b'*')
+        self.to_group = (bs.stack.sender() or '*')
 
         if None in (self.x, self.y):
             raise IndexError('Variable {} not found'.format(varx if self.x is None else (vary or varx)))
 
         # if not self.x.is_num() or not self.y.is_num():
         #     raise IndexError('Variable {} not numeric'.format(varx if not self.x.is_num() else (vary or varx)))
-        bs.net.send(b'PLOT', {self.fig: params}, self.to_group)
+        bs.net.send('PLOT', {self.fig: params}, self.to_group)
 
     def send(self):
-        bs.net.send(b'PLOT', {self.fig : dict(x=self.x.get(), y=self.y.get())}, self.to_group)
+        bs.net.send('PLOT', {self.fig : dict(x=self.x.get(), y=self.y.get())}, self.to_group)

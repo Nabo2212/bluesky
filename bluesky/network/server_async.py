@@ -10,7 +10,7 @@ import msgpack
 import bluesky as bs
 from bluesky.network.npcodec import encode_ndarray
 from bluesky.network.discovery import Discovery
-from bluesky.network.common import genid, zmq_msgid, bin2hex, MSG_SUBSCRIBE, MSG_UNSUBSCRIBE, GROUPID_SIM, IDLEN
+from bluesky.network.common import genid, unpack_zmq_msgid, zmq_msgid, MSG_SUBSCRIBE, MSG_UNSUBSCRIBE, GROUPID_SIM, IDLEN
 
 
 # Register settings defaults
@@ -34,7 +34,8 @@ class Server:
         self.running = True
         self.max_nnodes = min(cpu_count(), bs.settings.max_nnodes)
         self.scenarios = []
-        self.server_id = genid(groupid=GROUPID_SIM, seqidx=0)
+        self.server_id: str = genid(groupid=GROUPID_SIM, seqidx=0)
+        self.bserver_id: bytes = self.server_id.encode('charmap')
         self.max_group_idx = 0
         self.sim_nodes = set()
         self.all_nodes = set()
@@ -64,7 +65,7 @@ class Server:
     async def _spawn_single(self, node_id, startscn=None):
         ''' Spawn a single node with given node_id. '''
         newid = genid(node_id)
-        args = [sys.executable, '-m', 'bluesky', '--sim', '--groupid', bin2hex(newid)]
+        args = [sys.executable, '-m', 'bluesky', '--sim', '--groupid', newid]
         if self.altconfig:
             args.extend(['--configfile', self.altconfig])
         if self.workdir:
@@ -86,9 +87,9 @@ class Server:
     async def sendscenario(self, node_id):
         # Send a new scenario to the target sim process
         scen = self.scenarios.pop(0)
-        await self.send(b'BATCH', scen, node_id)
+        await self.send('BATCH', scen, node_id)
 
-    async def send(self, topic, data: Any='', to_group=b'', sender_id: str|bytes=b''):
+    async def send(self, topic: str, data: Any='', to_group: str='', sender_id: str='') -> None:
         ''' Send data originating from the server to the specified destination.
 
             Arguments:
@@ -97,43 +98,44 @@ class Server:
             - to_group: The destination mask. If empty, broadcast to all.
             - sender_id: The id of the sending node. If empty, use server id.
         '''
-        msgid = zmq_msgid(topic, to_group=to_group, from_group=sender_id or self.server_id)
+        # Pack identifier and data
+        msgid = zmq_msgid(topic, sender_id or self.server_id, to_group)
         packed = msgpack.packb(data, default=encode_ndarray, use_bin_type=True)
         if packed is not None:
             await self.forward(msgid, packed)
 
-    async def forward(self, msgid: bytes, data: bytes):
+    async def forward(self, msgid: bytes, data: bytes) -> None:
         await self.sock_send.send_multipart([msgid, data])
 
-    def run(self, threaded=False):
+    def run(self, threaded: bool=False) -> None:
         ''' Run the server loop. '''
         asyncio.run(self.loop())
 
-    async def subscribe(self, msgid: bytes):
+    async def subscribe(self, msgid: bytes) -> None:
         ''' Send subscribe request on the recv socket.
 
             Arguments:
-            - msgid: The message identifier to subscribe to
+            - msgid: The packed message identifier to subscribe to
               This is a zmq_msgid, so a concatenation of:
-                - to_group (destination mask padded to IDLEN with '*' bytes)
+                - to_group (destination mask padded to IDLEN with '*')
                 - the publication topic
                 - from_group (sender mask for subscriptions, sender id for the actual publications)
         '''
         await self.sock_recv.send_multipart([b'\x01' + msgid])
 
-    async def unsubscribe(self, msgid: bytes):
+    async def unsubscribe(self, msgid: bytes) -> None:
         ''' Send unsubscribe request on the recv socket.
 
             Arguments:
             - msgid: The message identifier to unsubscribe from
             This is a zmq_msgid, so a concatenation of:
-                - to_group (destination mask padded to IDLEN with '*' bytes)
+                - to_group (destination mask padded to IDLEN with '*')
                 - the publication topic
                 - from_group (sender mask for subscriptions, sender id for the actual publications)
         '''
         await self.sock_recv.send_multipart([b'\x00' + msgid])
 
-    async def register_node(self, node_id: bytes):
+    async def register_node(self, node_id: str) -> None:
         ''' Register a simulation node with this server.
 
             Arguments:
@@ -143,25 +145,24 @@ class Server:
         if node_id[0] == GROUPID_SIM and node_id in self.spawned_processes:
             # This is a node owned by this server which has successfully started.
             self.sim_nodes.add(node_id)
-            await self.send(b'REQUEST', ['STATECHANGE'], node_id)
+            await self.send('REQUEST', ['STATECHANGE'], node_id)
     
-    async def unregister_node(self, node_id: bytes):
+    async def unregister_node(self, node_id: str) -> None:
         ''' Unregister a simulation node from this server.
 
             Arguments:
             - node_id: The id of the node to unregister
         '''
-        print('Removing node', node_id)
         self.sim_nodes.discard(node_id)
 
-    async def loop(self):
+    async def loop(self) -> None:
         ''' Main server loop. '''
         self.sock_recv.bind(f'tcp://*:{bs.settings.send_port}')
         self.sock_send.bind(f'tcp://*:{bs.settings.recv_port}')
         self.poller.register(self.sock_recv, zmq.POLLIN)
         self.poller.register(self.sock_send, zmq.POLLIN)
 
-        print(f'BlueSky Simulation Server started with ID {bin2hex(self.server_id)}')
+        print(f'BlueSky Simulation Server started with ID {self.server_id}')
         print(f'Listening for clients on ports {bs.settings.recv_port} (recv) and {bs.settings.send_port} (send)')
 
         if self.discovery:
@@ -169,7 +170,7 @@ class Server:
         print(f'Discovery is {"en" if self.discovery else "dis"}abled')
 
         # Create subscription for messages targeted at this server
-        await self.sock_recv.send_multipart([b'\x01' + self.server_id])
+        await self.sock_recv.send_multipart([b'\x01' + self.server_id.encode('charmap')])
 
         # Start the first simulation node
         await self.addnodes(startscn=self.startscn)
@@ -200,28 +201,30 @@ class Server:
                     # This is an (un)subscribe message. If it's an id-only subscription
                     # this is also a registration message
                     if len(msg[0]) == IDLEN + 1:
+                        node_id = msg[0][1:].decode()
                         if msg[0][0] == MSG_SUBSCRIBE:
-                            await self.register_node(msg[0][1:])
+                            await self.register_node(node_id)
                             
                         elif msg[0][0] == MSG_UNSUBSCRIBE:
-                            await self.unregister_node(msg[0][1:])
+                            await self.unregister_node(node_id)
                     # Always forward to zmq publishers
                     await self.sock_recv.send_multipart(msg)
 
                 elif sock == self.sock_recv:
                     # First check if message is directed at this server
-                    if msg[0].startswith(self.server_id):
-                        topic, sender_id = msg[0][IDLEN:-IDLEN], msg[0][-IDLEN:]
+                    if msg[0].startswith(self.bserver_id):
+                        # Unpack the message
+                        topic, sender_id, to_group = unpack_zmq_msgid(msg[0])
                         data = msgpack.unpackb(msg[1], raw=False)
                         # TODO: also use Signal logic in server?
-                        if topic == b'QUIT':
+                        if topic == 'QUIT':
                             self.quit()
-                        elif topic == b'ADDNODES':
+                        elif topic == 'ADDNODES':
                             if isinstance(data, int):
                                 await self.addnodes(count=data)
                             elif isinstance(data, dict):
                                 await self.addnodes(**data)
-                        elif topic == b'STATECHANGE':
+                        elif topic == 'STATECHANGE':
                             state = data[1]['simstate']
                             if state < bs.OP:
                                 # If we have batch scenarios waiting, send
@@ -233,7 +236,7 @@ class Server:
                                     self.avail_nodes.add(sender_id)
                             else:
                                 self.avail_nodes.discard(sender_id)
-                        elif topic == b'BATCH':
+                        elif topic == 'BATCH':
                             scentime, scencmd = data
                             self.scenarios = [scen for scen in split_scenarios(scentime, scencmd)]
                             # Check if the batch list contains scenarios
@@ -263,7 +266,7 @@ class Server:
             proc.terminate()
         await asyncio.gather(*(
             [proc.wait() for proc in self.spawned_processes.values()] +
-            [self.sock_recv.send_multipart([b'\x00' + pid]) for pid in self.spawned_processes.keys()]
+            [self.sock_recv.send_multipart([b'\x00' + pid.encode('charmap')]) for pid in self.spawned_processes.keys()]
             ))
         print('Closing connections:', end=' ')
         self.poller.unregister(self.sock_recv)

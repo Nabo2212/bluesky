@@ -12,7 +12,7 @@ from bluesky.network.common import GROUPID_DEFAULT, ActionType, MessageType
 # trigger voor actnode changed?
 
 
-def subscriber(func=None, *, topic='', broadcast=True, actonly=False, raw=False, from_group=GROUPID_DEFAULT, to_group=''):
+def subscriber(func=None, *, topic: str='', broadcast=True, actonly=False, raw=False, from_group: str=GROUPID_DEFAULT, to_group: str=''):
     ''' BlueSky network subscription decorator.
 
         Functions decorated with this decorator will be called whenever data
@@ -96,9 +96,6 @@ class SubscriptionFactory(signal.SignalFactory):
             - to_group:   Subscribe to data sent to a specific group (optional)
             - actonly:    Only receive this data for the active node (client only)
         '''
-        # # Convert name to string if necessary
-        if isinstance(topic, bytes):
-            topic = topic.decode()
         # Get subscription object if it already exists
         sub = SubscriptionFactory.subscriptions.get(topic)
         if sub is None:

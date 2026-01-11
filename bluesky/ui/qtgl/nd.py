@@ -61,7 +61,7 @@ class ND(QGLWidget):
         bs.net.stream_received.connect(self.on_simstream_received)
 
     def on_simstream_received(self, streamname, data, sender_id):
-        if streamname == b'ACDATA':
+        if streamname == 'ACDATA':
             if self.ac_id in data['id']:
                 idx = data['id'].index(self.ac_id.upper())
                 lat = data['lat'][idx]

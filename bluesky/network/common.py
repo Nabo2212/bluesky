@@ -1,10 +1,7 @@
 import socket
-import binascii
 import string
-# from os import urandom
 import random
 from enum import Enum, auto
-from click import group
 import msgpack
 
 
@@ -12,10 +9,10 @@ import msgpack
 MSG_SUBSCRIBE = 1
 MSG_UNSUBSCRIBE = 0
 # Message headers (second byte): group identifiers
-GROUPID_DEFAULT = 0
-GROUPID_CLIENT = ord('C')
-GROUPID_SIM = ord('S')
-GROUPID_NOGROUP = ord('N')
+GROUPID_DEFAULT = '_'
+GROUPID_CLIENT = 'C'
+GROUPID_SIM = 'S'
+GROUPID_NOGROUP = 'N'
 # Connection identifier string length
 IDLEN = 6
 IDXLEN = 2
@@ -55,10 +52,10 @@ class MessageType(Enum):
     SharedState = auto()
 
 
-def genid(groupid: str|bytes|int='', idlen=IDLEN, idxlen=IDXLEN, seqidx=None):
-    ''' Generate a binary identifier string 
+def genid(groupid: str='', idlen=IDLEN, idxlen=IDXLEN, seqidx=None) -> str:
+    ''' Generate an identifier string 
     
-        The identifier string consists of a group identifier of idlen-1 bytes,
+        The identifier string consists of a group identifier of idlen-idxlen characters,
         and ends with a sequence number that is indicated with curidx.
 
         Arguments:
@@ -74,33 +71,35 @@ def genid(groupid: str|bytes|int='', idlen=IDLEN, idxlen=IDXLEN, seqidx=None):
 
         - seqidx: The value of the sequence index part of this identifier.
     '''
-    groupid = asbytestr(groupid)
     if len(groupid) >= idlen and seqidx is None:
         # If no sequence index is requested, just return the groupid truncated to idlen
         return groupid[:idlen]
     groupid = groupid[:idlen - idxlen]
 
+    # If there is room, add random characters
     if len(groupid) < idlen - 1:
-        # groupid += urandom(idlen - 1 - len(groupid)).replace(b'*', b'_')
-        groupid += ''.join(random.choices(_allowed_id_chars, k=idlen - IDXLEN - len(groupid))).encode('charmap')
-    return groupid + seqidx2id(seqidx or 0)
+        groupid += ''.join(random.choices(_allowed_id_chars, k=idlen - IDXLEN - len(groupid)))
+
+    # Finally add the hex-encoded sequence number and return
+    return groupid + f'{seqidx or 0:0{idxlen}x}'
 
 
-def ws_msgid(topic: str|bytes, from_group: int|str|bytes='', to_group: int|str|bytes=''):
+def ws_msgid(topic: str, from_group: str='', to_group: str='') -> bytes:
     ''' Generate a message identifier for publications to websocket connections.
     
         The message identifier is a msgpack-packed list consisting of the following parts:
-        - to_group (destination mask padded to IDLEN with '*' bytes)
+        - to_group (destination mask padded to IDLEN with '*')
         - the publication topic
         - from_group (sender mask for subscriptions, sender id for the actual publications)
         - a trailing None value (to be replaced with the message payload)
     '''
-    # TODO: bytes -> str or hex?
     packed = msgpack.packb([from_group, topic, to_group, None])
     if packed is not None:
         return packed[:-1]
+    return b''
 
-def unpack_zmq_msgid(msgid: bytes):
+
+def unpack_zmq_msgid(msgid: bytes) -> tuple[str, str, str]:
     ''' Unpack a zmq message identifier into its components.
     
         The message identifier is the concatenation of the following parts:
@@ -110,52 +109,33 @@ def unpack_zmq_msgid(msgid: bytes):
 
         Returns a tuple of (topic, from_group, to_group).
     '''
-    btopic = msgid[IDLEN:-IDLEN].decode()
-    bfrom_group = msgid[-IDLEN:]
-    bto_group = msgid[:IDLEN]
-    return (btopic, bfrom_group, bto_group)
+    smsgid = msgid.decode()
+    topic = smsgid[IDLEN:-IDLEN]
+    from_group = smsgid[-IDLEN:]
+    to_group = smsgid[:IDLEN]
+    return (topic, from_group, to_group)
 
-def zmq_msgid(topic: str|bytes, from_group: int|str|bytes='', to_group: int|str|bytes=''):
-    ''' Generate a message identifier for publications to ZMQ connections.
+
+def zmq_msgid(topic: str, from_group: str='', to_group: str='') -> bytes:
+    ''' Generate a binary message identifier for publications to ZMQ connections.
     
         The message identifier is the concatenation of the following parts:
-        - to_group (destination mask padded to IDLEN with '*' bytes)
+        - to_group (destination mask padded to IDLEN with '*')
         - the publication topic
         - from_group (sender mask for subscriptions, sender id for the actual publications)
     '''
-    btopic = asbytestr(topic)
-    bto_group = asbytestr(to_group)
-    bfrom_group = asbytestr(from_group)
-    return bto_group.ljust(IDLEN, b'*') + btopic + bfrom_group
+    return (to_group.ljust(IDLEN, '*') + topic + from_group).encode('charmap')
 
 
-def getseqidxfromid(nodeid: bytes):
+def getseqidxfromid(nodeid: str) -> int:
     ''' Get the sequence index from a node identifier string. '''
     return int(nodeid[-2:], 16)
 
 
-def seqid2idx(seqid):
-    ''' Transform a hexadecimal bytestring sequence id to a numeric sequence index.
+def seqid2idx(seqid: str) -> int:
+    ''' Transform a hexadecimal sequence id string to a numeric sequence index.
     '''
     return int(seqid, 16)
-
-
-def seqidx2id(seqidx):
-    ''' Transform a numeric sequence index to a hexadecimal bytestring sequence id '''
-    return f'{seqidx:02x}'.encode('charmap')
-
-
-def asbytestr(val:int|str|bytes) -> bytes:
-    return chr(val).encode('charmap') if isinstance(val, int) else \
-              val.encode('charmap') if isinstance(val, str) else \
-              val
-
-def bin2hex(bstr):
-    return binascii.hexlify(bstr).decode()
-
-
-def hex2bin(hstr):
-    return binascii.unhexlify(hstr)
 
 
 def get_ownip():

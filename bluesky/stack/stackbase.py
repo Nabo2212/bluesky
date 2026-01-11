@@ -85,7 +85,7 @@ def forward(*cmdlines, target_id=None):
     '''
     if target_id is not None or Stack.sender_id is None:
         # Only forward if this command originated here
-        bs.net.send(b'STACK', ';'.join(cmdlines) if cmdlines else Stack.current, target_id)
+        bs.net.send('STACK', ';'.join(cmdlines) if cmdlines else Stack.current, target_id)
 
 
 def sender():

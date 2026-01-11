@@ -104,11 +104,11 @@ class ScreenIO(Entity):
         return True
 
     def show_file_dialog(self):
-        bs.net.send(b'SHOWDIALOG', dict(dialog='OPENFILE'))
+        bs.net.send('SHOWDIALOG', dict(dialog='OPENFILE'))
         return ''
 
     def show_cmd_doc(self, cmd=''):
-        bs.net.send(b'SHOWDIALOG', dict(dialog='DOC', args=cmd))
+        bs.net.send('SHOWDIALOG', dict(dialog='DOC', args=cmd))
 
     @stack.commandgroup(annotations='txt,color', aliases=('COLOR', 'COL'))
     def colour(self, name, r, g, b):
@@ -128,7 +128,7 @@ class ScreenIO(Entity):
         speed = (self.samplecount - self.prevcount) / dt * bs.sim.simdt
         self.prevtime  = t
         self.prevcount = self.samplecount
-        bs.net.send(b'SIMINFO', (speed, bs.sim.simdt, bs.sim.simt,
+        bs.net.send('SIMINFO', (speed, bs.sim.simdt, bs.sim.simt,
             str(bs.sim.utc.replace(microsecond=0)), bs.traf.ntraf, bs.sim.state, stack.get_scenname()))
         
 
@@ -199,7 +199,7 @@ class ScreenIO(Entity):
         # Case 2: only a route selected from scenario file:
         # Broadcast the same route to everyone
         elif self.route_all:
-            self._sendrte(b'*', self.route_all)
+            self._sendrte('*', self.route_all)
         
     def _sendrte(self, sender, acid):
         ''' Local shorthand function to send route. '''
@@ -222,4 +222,4 @@ class ScreenIO(Entity):
 
             data['wpname'] = route.wpname
 
-        self.pub_route.send_replace((sender or b'C'), **data)
+        self.pub_route.send_replace((sender or 'C'), **data)

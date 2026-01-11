@@ -339,7 +339,7 @@ class RadarWidget(glh.RenderWidget):
         elif (event.type() == QEvent.Type.MouseButtonRelease or
               event.type() == QEvent.Type.TouchEnd) and self.panzoomchanged:
             self.panzoomchanged = False
-            bs.net.send(b'PANZOOM', dict(pan=(self.pan[0], self.pan[1]),
+            bs.net.send('PANZOOM', dict(pan=(self.pan[0], self.pan[1]),
                                          zoom=self.zoom, ar=self.ar, absolute=True))
             self.panzoom_event.emit(ss.get().panzoom, True)
         elif int(event.type()) == 216:

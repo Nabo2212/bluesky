@@ -1,4 +1,5 @@
 ''' Server test '''
+from collections.abc import Collection
 import sys
 import signal
 from subprocess import Popen
@@ -11,7 +12,7 @@ import msgpack
 import bluesky as bs
 from bluesky.network.npcodec import encode_ndarray
 from bluesky.network.discovery import Discovery
-from bluesky.network.common import genid, bin2hex, MSG_SUBSCRIBE, MSG_UNSUBSCRIBE, GROUPID_SIM, IDLEN
+from bluesky.network.common import genid, MSG_SUBSCRIBE, MSG_UNSUBSCRIBE, GROUPID_SIM, IDLEN, unpack_zmq_msgid, zmq_msgid
 
 
 # Register settings defaults
@@ -38,6 +39,7 @@ class Server(Thread):
         self.max_nnodes = min(cpu_count(), bs.settings.max_nnodes)
         self.scenarios = []
         self.server_id = genid(groupid=GROUPID_SIM, seqidx=0)
+        self.bserver_id = self.server_id.encode('charmap')
         self.max_group_idx = 0
         self.sim_nodes = set()
         self.all_nodes = set()
@@ -65,7 +67,7 @@ class Server(Thread):
     def sendscenario(self, node_id):
         # Send a new scenario to the target sim process
         scen = self.scenarios.pop(0)
-        self.send(b'BATCH', scen, node_id)
+        self.send('BATCH', scen, node_id)
 
     def addnodes(self, count=1, node_ids=None, startscn=None):
         ''' Add [count] nodes to this server. '''
@@ -75,7 +77,7 @@ class Server(Thread):
             else:
                 self.max_group_idx += 1
                 newid = genid(self.server_id[:-1], seqidx=self.max_group_idx)
-            args = [sys.executable, '-m', 'bluesky', '--sim', '--groupid', bin2hex(newid)]
+            args = [sys.executable, '-m', 'bluesky', '--sim', '--groupid', newid]
             if self.altconfig:
                 args.extend(['--configfile', self.altconfig])
             if self.workdir:
@@ -84,10 +86,10 @@ class Server(Thread):
                 args.extend(['--scenfile', startscn])
             self.spawned_processes[newid] = Popen(args)
 
-    def send(self, topic, data='', dest=b''):
+    def send(self, topic, data: str|Collection='', dest=''):
         self.sock_send.send_multipart(
             [
-                dest.ljust(IDLEN, b'*') + topic + self.server_id,
+                zmq_msgid(topic, self.server_id, dest),
                 msgpack.packb(data, default=encode_ndarray, use_bin_type=True)
             ]
         )
@@ -109,7 +111,7 @@ class Server(Thread):
         print(f'Discovery is {"en" if self.discovery else "dis"}abled')
 
         # Create subscription for messages targeted at this server
-        self.sock_recv.send_multipart([b'\x01' + self.server_id])
+        self.sock_recv.send_multipart([b'\x01' + self.server_id.encode('charmap')])
 
         # Start the first simulation node
         self.addnodes(startscn=self.startscn)
@@ -146,31 +148,32 @@ class Server(Thread):
                     # This is an (un)subscribe message. If it's an id-only subscription
                     # this is also a registration message
                     if len(msg[0]) == IDLEN + 1:
+                        node_id = msg[0][1:].decode()
                         if msg[0][0] == MSG_SUBSCRIBE:
                             # This is an initial client, server, or node subscription
-                            if msg[0][1] == GROUPID_SIM and msg[0][1:] in self.spawned_processes:
+                            if node_id in self.spawned_processes:
                                 # This is a node owned by this server which has successfully started.
-                                self.sim_nodes.add(msg[0][1:])
-                                self.send(b'REQUEST', ['STATECHANGE'], msg[0][1:])
-                        elif msg[0][0] == MSG_UNSUBSCRIBE and msg[0][1] == GROUPID_SIM and msg[0][1:] in self.spawned_processes:
-                            print('Removing node', msg[0][1:])
-                            self.sim_nodes.discard(msg[0][1:])
+                                self.sim_nodes.add(node_id)
+                                self.send('REQUEST', ['STATECHANGE'], node_id)
+                        elif msg[0][0] == MSG_UNSUBSCRIBE and node_id in self.spawned_processes:
+                            print('Removing node', node_id)
+                            self.sim_nodes.discard(node_id)
                     # Always forward
                     self.sock_recv.send_multipart(msg)
                 elif sock == self.sock_recv:
                     # First check if message is directed at this server
-                    if msg[0].startswith(self.server_id):
-                        topic, sender_id = msg[0][IDLEN:-IDLEN], msg[0][-IDLEN:]
+                    if msg[0].startswith(self.bserver_id):
+                        topic, sender_id, to_group = unpack_zmq_msgid(msg[0])
                         data = msgpack.unpackb(msg[1], raw=False)
                         # TODO: also use Signal logic in server?
-                        if topic == b'QUIT':
+                        if topic == 'QUIT':
                             self.quit()
-                        elif topic == b'ADDNODES':
+                        elif topic == 'ADDNODES':
                             if isinstance(data, int):
                                 self.addnodes(count=data)
                             elif isinstance(data, dict):
                                 self.addnodes(**data)
-                        elif topic == b'STATECHANGE':
+                        elif topic == 'STATECHANGE':
                             state = data[1]['simstate']
                             if state < bs.OP:
                                 # If we have batch scenarios waiting, send
@@ -182,7 +185,7 @@ class Server(Thread):
                                     self.avail_nodes.add(sender_id)
                             else:
                                 self.avail_nodes.discard(sender_id)
-                        elif topic == b'BATCH':
+                        elif topic == 'BATCH':
                             scentime, scencmd = data
                             self.scenarios = [scen for scen in split_scenarios(scentime, scencmd)]
                             # Check if the batch list contains scenarios
@@ -201,9 +204,9 @@ class Server(Thread):
                                 reqd_nnodes = min(len(self.scenarios), max(0, self.max_nnodes - len(self.sim_nodes)))
                                 self.addnodes(reqd_nnodes)
                             # ECHO the results to the calling client
-                            topic = b'ECHO'
+                            topic = 'ECHO'
                             data = msgpack.packb(dict(text=echomsg, flags=0), use_bin_type=True)
-                            self.sock_send.send_multipart([sender_id + topic + self.server_id, data])
+                            self.sock_send.send_multipart([zmq_msgid(topic, sender_id, self.server_id), data])
                     else:
                         self.sock_send.send_multipart(msg)
         print('Server quit. Stopping nodes:')
@@ -213,7 +216,7 @@ class Server(Thread):
             p.terminate()
             p.wait()
             # Inform network that node is removed
-            self.sock_recv.send_multipart([b'\x00' + pid])
+            self.sock_recv.send_multipart([b'\x00' + pid.encode('charmap')])
             # print('done')
         print('Closing connections:', end=' ')
         self.poller.unregister(self.sock_recv)

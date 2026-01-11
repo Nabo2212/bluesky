@@ -13,11 +13,10 @@ class SignalFactory(type):
         # if no name is passed, return an anonymous Signal
         if not topic:
             return super().__call__('ANONYMOUS', *args, **kwargs)
-        # Convert name to string if necessary
-        if isinstance(topic, bytes):
-            topic = topic.decode()
+
         # Signal topics are case-insensitive
         topic = topic.upper()
+
         # Check if this Signal already exists. If it doesn't, create it.
         sig = SignalFactory.__signals__.get(topic)
         if sig is None:

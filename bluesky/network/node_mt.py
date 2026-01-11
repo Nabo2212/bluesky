@@ -35,7 +35,7 @@ class IOThread(Thread):
                 be_event.send_multipart(fe_event.recv_multipart())
             if poll_socks.get(be_event) == zmq.POLLIN:
                 msg = be_event.recv_multipart()
-                if msg[0] == b'QUIT':
+                if msg[0] == 'QUIT':
                     break
                 fe_event.send_multipart(msg)
             if poll_socks.get(be_stream) == zmq.POLLIN:
@@ -44,8 +44,8 @@ class IOThread(Thread):
 
 class Node:
     def __init__(self):
-        self.server_id = b''
-        self.node_id = b''
+        self.server_id = ''
+        self.node_id = ''
         self.running = True
         ctx = zmq.Context.instance()
         self.event_io = ctx.socket(zmq.PAIR)
@@ -71,7 +71,7 @@ class Node:
 
         # Start the I/O thread, and receive from it this node's ID
         self.iothread.start()
-        self.send_event(b'REGISTER')
+        self.send_event('REGISTER')
         self.node_id = self.event_io.recv_multipart()[-1]
         self.server_id = self.node_id[:5]
         print(f'Node started, id={self.node_id}')
@@ -80,7 +80,7 @@ class Node:
         self.run()
 
         # Send quit event to the worker thread and wait for it to close.
-        self.event_io.send(b'QUIT')
+        self.event_io.send('QUIT')
         self.iothread.join()
 
     def quit(self):
@@ -95,7 +95,7 @@ class Node:
                 res = self.event_io.recv_multipart()
                 sender_id = res[0]
                 name = res[1]
-                if name == b'QUIT':
+                if name == 'QUIT':
                     self.quit()
                 else:
                     data = msgpack.unpackb(res[2], object_hook=decode_ndarray, raw=False)
@@ -115,11 +115,11 @@ class Node:
             return False
 
     def addnodes(self, count=1):
-        self.send_event(b'ADDNODES', count)
+        self.send_event('ADDNODES', count)
 
     def send_event(self, name, data=None, target=None):
         # On the sim side, target is obtained from the currently-parsed stack command
-        self.event_io.send_multipart([stack.sender() or b'*', name, msgpack.packb(data, default=encode_ndarray, use_bin_type=True)])
+        self.event_io.send_multipart([stack.sender() or '*', name, msgpack.packb(data, default=encode_ndarray, use_bin_type=True)])
 
     def send_stream(self, name, data):
         self.stream_out.send_multipart([name + self.node_id, msgpack.packb(data, default=encode_ndarray, use_bin_type=True)])
