@@ -22,7 +22,7 @@ hooks = SimpleNamespace(
 )
 
 
-def timed_function(func=None, name='', dt=0, hook='update'):
+def timed_function(func=None, name='', dt=0, hook: str|tuple[str, ...]='update'):
     ''' Decorator to turn a function into a (periodically) timed function. '''
     def deco(func):
         # Generate a name if none is provided
