@@ -97,7 +97,7 @@ class Simulation(Base):
         # Close savefile which may be open for recording
         recorder.saveclose()  # Close reording file if it is on
 
-    def step(self, dt_increment=0):
+    def step(self, dt_increment=0.0):
         ''' Perform one simulation timestep.
         
             Call this function instead of update if you don't want to run with a fixed

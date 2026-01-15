@@ -40,7 +40,7 @@ def setdt(newdt=None, target='simdt'):
     return timer.setdt(newdt)
 
 
-def step(recovery_time=0):
+def step(recovery_time=0.0):
     ''' Increment the time of this clock with one timestep, plus a possible
         recovery time increment if the simulation is lagging and real-time
         running is enabled.
