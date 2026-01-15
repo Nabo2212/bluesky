@@ -63,12 +63,6 @@ class Server(Thread):
         self.sock_send = ctx.socket(zmq.XPUB)
         self.poller = zmq.Poller()
 
-        # Connect to interrupt signal
-        signal.signal(signal.SIGINT, lambda *args: self.quit())
-        signal.signal(signal.SIGTERM, lambda *args: self.quit())
-        if platform.system() == 'Windows':
-            signal.signal(getattr(signal, 'SIGBREAK'), lambda *args: self.quit())
-
     def quit(self):
         self.running = False
 
@@ -248,6 +242,10 @@ def start(threaded=False, **kwargs):
     # Connect to interrupt signal
     signal.signal(signal.SIGINT, lambda *args: server.quit())
     signal.signal(signal.SIGTERM, lambda *args: server.quit())
+    if platform.system() == 'Windows':
+        signal.signal(getattr(signal, 'SIGBREAK'), lambda *args: server.quit())
+
+
 
     # Run the server loop
     if threaded:

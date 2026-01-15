@@ -1,4 +1,6 @@
+import platform
 import sys
+import os
 import signal
 from multiprocessing import cpu_count
 import asyncio
@@ -66,13 +68,16 @@ class Server:
         ''' Spawn a single node with given node_id. '''
         newid = genid(node_id)
         args = [sys.executable, '-m', 'bluesky', '--sim', '--groupid', newid]
+        kwargs = dict()
         if self.altconfig:
             args.extend(['--configfile', self.altconfig])
         if self.workdir:
             args.extend(['--workdir', self.workdir])
         if startscn:
             args.extend(['--scenfile', startscn])
-        return newid, await asyncio.subprocess.create_subprocess_exec(*args)
+        if platform.system() == 'Windows':
+                kwargs['creationflags'] = getattr(asyncio.subprocess, 'CREATE_NEW_PROCESS_GROUP')
+        return newid, await asyncio.subprocess.create_subprocess_exec(*args, **kwargs)
 
     async def addnodes(self, count=1, node_ids=None, startscn=None):
         ''' Add [count] nodes to this server. '''
@@ -263,7 +268,11 @@ class Server:
 
         # Terminate all spawned processes
         for proc in self.spawned_processes.values():
-            proc.terminate()
+            if platform.system() == 'Windows':
+                os.kill(proc.pid, getattr(signal, 'CTRL_BREAK_EVENT'))
+            else:
+                proc.terminate()
+
         await asyncio.gather(*(
             [proc.wait() for proc in self.spawned_processes.values()] +
             [self.sock_recv.send_multipart([b'\x00' + pid.encode('charmap')]) for pid in self.spawned_processes.keys()]
@@ -282,6 +291,8 @@ def start(threaded=False, **kwargs):
     # Connect to interrupt signal
     signal.signal(signal.SIGINT, lambda *args: server.quit())
     signal.signal(signal.SIGTERM, lambda *args: server.quit())
+    if platform.system() == 'Windows':
+        signal.signal(getattr(signal, 'SIGBREAK'), lambda *args: server.quit())
 
     # Run the server loop
     server.run(threaded)
