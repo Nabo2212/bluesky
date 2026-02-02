@@ -30,14 +30,14 @@ class ActionType(Enum):
         Reset: The entire object is reset to its (empty) default
         ActChange: A new active remote is selected
     '''
-    Append = b'A'
-    Extend = b'E'
-    Delete = b'D'
-    Update = b'U'
-    Replace = b'R'
-    Reset = b'X'
-    ActChange = b'C'
-    NoAction = b''
+    Append = 'A'
+    Extend = 'E'
+    Delete = 'D'
+    Update = 'U'
+    Replace = 'R'
+    Reset = 'X'
+    ActChange = 'C'
+    NoAction = ''
 
     @classmethod
     def isaction(cls, data):
@@ -93,7 +93,7 @@ def ws_msgid(topic: str, from_group: str='', to_group: str='') -> bytes:
         - from_group (sender mask for subscriptions, sender id for the actual publications)
         - a trailing None value (to be replaced with the message payload)
     '''
-    packed = msgpack.packb([from_group, topic, to_group, None])
+    packed = msgpack.packb([to_group, topic, from_group, None])
     if packed is not None:
         return packed[:-1]
     return b''
