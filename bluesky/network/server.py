@@ -12,7 +12,7 @@ import zmq
 import msgpack
 
 import bluesky as bs
-from bluesky.network.npcodec import encode_ndarray
+from bluesky.network.npcodec import encode_ext
 from bluesky.network.discovery import Discovery
 from bluesky.network.common import genid, MSG_SUBSCRIBE, MSG_UNSUBSCRIBE, GROUPID_SIM, IDLEN, unpack_zmq_msgid, zmq_msgid
 
@@ -96,7 +96,7 @@ class Server(Thread):
         self.sock_send.send_multipart(
             [
                 zmq_msgid(topic, self.server_id, dest),
-                msgpack.packb(data, default=encode_ndarray, use_bin_type=True)
+                msgpack.packb(data, default=encode_ext, use_bin_type=True)
             ]
         )
 

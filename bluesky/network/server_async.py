@@ -10,7 +10,7 @@ import zmq.asyncio
 import msgpack
 
 import bluesky as bs
-from bluesky.network.npcodec import encode_ndarray
+from bluesky.network.npcodec import encode_ext
 from bluesky.network.discovery import Discovery
 from bluesky.network.common import genid, unpack_zmq_msgid, zmq_msgid, MSG_SUBSCRIBE, MSG_UNSUBSCRIBE, GROUPID_SIM, IDLEN
 
@@ -64,9 +64,13 @@ class Server:
         print('Quit signal received')
         self.running = False
 
-    async def _spawn_single(self, node_id, startscn=None):
+    async def _spawn_single(self, node_id=None, startscn=None):
         ''' Spawn a single node with given node_id. '''
-        newid = genid(node_id)
+        if node_id:
+            newid = genid(node_id)
+        else:
+            self.max_group_idx += 1
+            newid = genid(self.server_id, seqidx=self.max_group_idx)
         args = [sys.executable, '-m', 'bluesky', '--sim', '--groupid', newid]
         kwargs = dict()
         if self.altconfig:
@@ -84,7 +88,7 @@ class Server:
         self.spawned_processes.update({
             newid:proc for newid, proc in await asyncio.gather(
                 *(self._spawn_single(node_id=(
-                    node_ids[idx] if node_ids else self.server_id[:-1]
+                    node_ids[idx] if node_ids else None
                 ), startscn=startscn) for idx in range(count))
             )
         })
@@ -105,7 +109,7 @@ class Server:
         '''
         # Pack identifier and data
         msgid = zmq_msgid(topic, sender_id or self.server_id, to_group)
-        packed = msgpack.packb(data, default=encode_ndarray, use_bin_type=True)
+        packed = msgpack.packb(data, default=encode_ext, use_bin_type=True)
         if packed is not None:
             await self.forward(msgid, packed)
 

@@ -7,7 +7,7 @@ from bluesky import stack
 from bluesky.core import Entity, Signal
 from bluesky.network import context as ctx
 from bluesky.network.subscriber import Subscription
-from bluesky.network.npcodec import encode_ndarray, decode_ndarray
+from bluesky.network.npcodec import encode_ext, ext_hook
 from bluesky.network.common import genid, zmq_msgid, getseqidxfromid, unpack_zmq_msgid, MSG_SUBSCRIBE, MSG_UNSUBSCRIBE, GROUPID_NOGROUP, GROUPID_CLIENT, GROUPID_SIM, GROUPID_DEFAULT, IDLEN
 
 
@@ -103,7 +103,7 @@ class Node(Entity):
                 if sock == self.sock_recv:
                     # Unpack incoming data
                     ctx.topic, ctx.sender_id, to_group = unpack_zmq_msgid(ctx.msg[0])
-                    pydata = msgpack.unpackb(ctx.msg[1], object_hook=decode_ndarray, raw=False)
+                    pydata = msgpack.unpackb(ctx.msg[1], ext_hook=ext_hook, raw=False)
 
                     sub = Subscription.subscriptions.get(ctx.topic, None) #or Subscription(ctx.topic, directedonly=True)
                     if sub is None:
@@ -162,7 +162,7 @@ class Node(Entity):
         self.sock_send.send_multipart(
             [
                 msgid,
-                msgpack.packb(data, default=encode_ndarray, use_bin_type=True)
+                msgpack.packb(data, default=encode_ext, use_bin_type=True)
             ]
         )
 
