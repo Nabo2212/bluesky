@@ -9,14 +9,14 @@ class TrafficProxy(Base):
         of received data on client side.
     '''
     id: ActData[list] = ActData(group='acdata')
-    lat: ActData[np.ndarray] = ActData(0, group='acdata')
-    lon: ActData[np.ndarray] = ActData(0, group='acdata')
-    alt: ActData[np.ndarray] = ActData(0, group='acdata')
-    trk: ActData[np.ndarray] = ActData(0, group='acdata')
-    cas: ActData[np.ndarray] = ActData(0, group='acdata')
-    tas: ActData[np.ndarray] = ActData(0, group='acdata')
-    gs: ActData[np.ndarray] = ActData(0, group='acdata')
-    vs: ActData[np.ndarray] = ActData(0, group='acdata')
+    lat: ActData[np.ndarray] = ActData(group='acdata')
+    lon: ActData[np.ndarray] = ActData(group='acdata')
+    alt: ActData[np.ndarray] = ActData(group='acdata')
+    trk: ActData[np.ndarray] = ActData(group='acdata')
+    cas: ActData[np.ndarray] = ActData(group='acdata')
+    tas: ActData[np.ndarray] = ActData(group='acdata')
+    gs: ActData[np.ndarray] = ActData(group='acdata')
+    vs: ActData[np.ndarray] = ActData(group='acdata')
     translvl: ActData[float] = ActData(0.0, group='acdata')
 
     # data['ingroup']    = bs.traf.groups.ingroup
