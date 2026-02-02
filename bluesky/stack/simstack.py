@@ -352,7 +352,7 @@ def showhelp(cmd:'txt'='', subcmd:'txt'=''):
     # Check if help is asked for a specific command
     cmdobj = Command.cmddict.get(cmd or 'HELP')
     if cmdobj:
-        return True, cmdobj.helptext(subcmd)
+        return True, f'{" ".join((cmd, subcmd))}: Stack command implemented on the Simulation side' + cmdobj.helptext(subcmd)
 
     # Write command reference to tab-delimited text file
     if cmd[0] == ">":

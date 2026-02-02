@@ -116,9 +116,10 @@ def showhelp(cmd: 'txt' = '', subcmd: 'txt' = ''):
     # Check if help is asked for a specific command
     cmdobj = Command.cmddict.get(cmd or 'HELP')
     if cmdobj:
-        return True, cmdobj.helptext(subcmd)
+        return True, f'{" ".join((cmd, subcmd))}: Stack command implemented on the Client side' + cmdobj.helptext(subcmd)
 
-    # If command is not a known Client command pass the help request on to the sim
+    # Pass the help request on to the sim so that help text is (also) printed if the command is
+    # implemented on the sim side.
     forward(target_id=bs.net.act_id)
 
 
