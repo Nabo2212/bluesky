@@ -21,7 +21,7 @@ def parse():
 
     # Add all possible arguments to bluesky here
     mode = parser.add_mutually_exclusive_group()
-    mode.set_defaults(mode="server", gui="qtgl", hostname=None, detached=False)
+    mode.set_defaults(mode="server", gui="qtgl", srvtype="sync", hostname=None, detached=False)
     mode.add_argument("--headless", dest="mode", action=setmodegui("server", discoverable=True), nargs=0, help="Start simulation server only, without GUI.")
     mode.add_argument("--client", dest="hostname", action=setmodegui("client", "qtgl"),
                     nargs="?", default=None, help="Start QtGL graphical client, which can connect to an already running server. When no hostname is passed, a discovery dialog is shown to let the user select a BlueSky server")
@@ -41,6 +41,11 @@ def parse():
                         help="Load scenario file on startup.")
     scnparse.add_argument("--scenfile", dest="scenfile",
                         help="Load scenario file on startup.")
+
+    srvparse = parser.add_mutually_exclusive_group()
+    srvparse.add_argument("--sync", dest="srvtype", action="store_const", const="sync", help="Run synchronous server")
+    srvparse.add_argument("--async", dest="srvtype", action="store_const", const="async", help="Run async server")
+    srvparse.add_argument("--web", dest="srvtype", action="store_const", const="web", help="Run async webserver")
 
     parser.add_argument("--discoverable", dest="enable_discovery", action="store_const", const=True,
                         default=False, help="Make simulation server discoverable. (Default in headless mode).")

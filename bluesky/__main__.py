@@ -48,7 +48,12 @@ def main():
         if bs.mode == 'server':
             # If mode is server-gui or server-headless start the networking server
             threaded = (bs.gui is not None)
-            from bluesky.network import server
+            if bs.srvtype == 'sync':
+                from bluesky.network import server
+            elif bs.srvtype == 'async':
+                from bluesky.network import server_async as server
+            else:
+                from bluesky.network import webserver as server
             # from bluesky.network import server_async as server
             server.start(threaded, **args)
 
@@ -63,7 +68,7 @@ def main():
 
     # Give info on missing module
     except ImportError as error:
-        modulename = missingmodules.get(error.name) or error.name
+        modulename = missingmodules.get(error.name or '') or error.name
         if modulename is None or 'bluesky' in modulename:
             raise error
         print("Bluesky needs", modulename)

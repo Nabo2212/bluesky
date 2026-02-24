@@ -28,7 +28,7 @@ sim = None
 scr = None
 
 
-def init(mode='sim', gui=None, configfile='', scenfile=None, group_id=None, **kwargs):
+def init(mode='sim', gui=None, srvtype='sync', configfile='', scenfile=None, group_id=None, **kwargs):
     ''' Initialize bluesky modules.
 
         Arguments:
@@ -50,6 +50,8 @@ def init(mode='sim', gui=None, configfile='', scenfile=None, group_id=None, **kw
         'Possible modes are sim, client, and server.'
     assert gui in (None, 'qtgl', 'pygame', 'console'), f'BlueSky init: Unrecognised gui type {gui}. '\
         'Possible types are qtgl, pygame, and console.'
+    assert srvtype in ('sync', 'async', 'web'), f'BlueSky init: Unrecognised server type {srvtype}. '\
+        'Possible types are sync, async, and web.'
     if kwargs.get('enable_discovery', False):
         assert mode == 'server', 'BlueSky init: Discoverable can only be set in server mode.'
     if scenfile:
@@ -59,9 +61,10 @@ def init(mode='sim', gui=None, configfile='', scenfile=None, group_id=None, **kw
     if kwargs.get('detached', False):
         assert mode == 'sim', 'BlueSky init: Detached operation is only available in sim mode.'
 
-    # Keep track of mode and gui type.
+    # Keep track of mode, server and gui type.
     globals()['mode'] = mode
     globals()['gui'] = gui
+    globals()['srvtype'] = srvtype
 
     global traf, sim, scr, net, navdb
 
