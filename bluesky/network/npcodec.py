@@ -16,12 +16,17 @@ import msgpack
 #         return np.frombuffer(o['data'], dtype=np.dtype(o['type'])).reshape(o['shape'])
 #     return o
 
+def encode_json(obj) -> str:
+    if isinstance(obj, np.ndarray):
+        return str(obj)
+    raise TypeError
 
 
 def encode_ext(obj):
     if isinstance(obj, np.ndarray):
         return msgpack.ExtType(42, msgpack.packb([obj.dtype.str, obj.shape, obj.tobytes()]))
     raise TypeError("Unknown type: %r" % (obj,))
+
 
 def ext_hook(code, data):
     if code == 42:

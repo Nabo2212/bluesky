@@ -102,7 +102,7 @@ class Server(Thread):
 
     def run(self):
         ''' The main loop of this server. '''
-        print(f'Starting server with id', self.server_id)
+        print(f'Starting synchronous server with id', self.server_id)
         # For the server, send/recv ports are reversed
         self.sock_recv.bind(f'tcp://*:{bs.settings.send_port}')
         self.sock_send.bind(f'tcp://*:{bs.settings.recv_port}')

@@ -1,7 +1,9 @@
+from collections import defaultdict
 import platform
 import sys
 import os
 import signal
+import threading
 from multiprocessing import cpu_count
 import asyncio
 from typing import Any
@@ -10,9 +12,9 @@ import zmq.asyncio
 import msgpack
 
 import bluesky as bs
-from bluesky.network.npcodec import encode_ext
+from bluesky.network.npcodec import encode_ext, ext_hook
 from bluesky.network.discovery import Discovery
-from bluesky.network.common import genid, unpack_zmq_msgid, zmq_msgid, MSG_SUBSCRIBE, MSG_UNSUBSCRIBE, GROUPID_SIM, IDLEN
+from bluesky.network.common import ActionType, genid, unpack_zmq_msgid, zmq_msgid, MSG_SUBSCRIBE, MSG_UNSUBSCRIBE, GROUPID_SIM, IDLEN
 
 
 # Register settings defaults
@@ -42,6 +44,8 @@ class Server:
         self.sim_nodes = set()
         self.all_nodes = set()
         self.avail_nodes = set()
+
+        self._requests: dict[tuple[str, str], Request] = defaultdict(Request)
 
         # Information to pass on to spawned nodes
         self.workdir = workdir
@@ -118,7 +122,35 @@ class Server:
 
     def run(self, threaded: bool=False) -> None:
         ''' Run the server loop. '''
-        asyncio.run(self.loop())
+        if threaded:
+            # create a new thread to execute the server main loop
+            thread = threading.Thread(target=asyncio.run, args=(self.loop(),))
+            thread.start()
+        else:
+            asyncio.run(self.loop())
+
+    async def _request_response(self, node_id, topic):
+        return await self._requests[(node_id, topic)].get()
+
+    async def request(self, node_id, *topics, timeout=0.0) -> dict|str|None:
+        ''' Send a data request to a node for one or more topics. 
+            When timeout is larger than zero this method will block until all
+            responses are in, or when the timeout duration is reached.
+            When timeout=0 it returns None, otherwise a dictionary with 
+            collecred responses.
+        '''
+        if node_id not in self.sim_nodes:
+            return f'Node with ID {node_id} does not exist, or is not connected to this server.'
+        utopics = [t.upper() for t in topics]
+        snd = self.send('REQUEST', utopics, node_id)
+        if timeout == 0:
+            return await snd
+        
+        tasks = [asyncio.create_task(self._request_response(node_id, topic), name=topic) for topic in utopics]
+        await asyncio.gather(snd, asyncio.wait(tasks, timeout=timeout))
+        return {
+                task.get_name(): task.result() if task.done() else f'Timeout or topic unknown. Waited {timeout} seconds' for task in tasks
+            }
 
     async def subscribe(self, msgid: bytes) -> None:
         ''' Send subscribe request on the recv socket.
@@ -224,9 +256,12 @@ class Server:
                     if msg[0].startswith(self.bserver_id):
                         # Unpack the message
                         topic, sender_id, to_group = unpack_zmq_msgid(msg[0])
-                        data = msgpack.unpackb(msg[1], raw=False)
-                        # TODO: also use Signal logic in server?
-                        if topic == 'QUIT':
+                        data = msgpack.unpackb(msg[1], ext_hook=ext_hook, raw=False)
+                        # Check if someone was waiting for this response.
+                        # If so, notify with data
+                        if request := self._requests.pop((sender_id, topic), None):
+                            request.set(data)
+                        elif topic == 'QUIT':
                             self.quit()
                         elif topic == 'ADDNODES':
                             if isinstance(data, int):
@@ -288,6 +323,21 @@ class Server:
         self.sock_send.close()
         zmq.Context.instance().destroy()
         print('done')
+
+
+class Request:
+    def __init__(self) -> None:
+        self._event = asyncio.Event()
+        self.data = None
+
+    async def get(self):
+        await self._event.wait()
+        return self.data
+    
+    def set(self, data):
+        self.data = data[1] if ActionType.isaction(data[0]) else data[0]
+        self._event.set()
+
 
 def start(threaded=False, **kwargs):
     server = Server(kwargs.get('altconfig'), kwargs.get('startscn'), kwargs.get('workdir'))
