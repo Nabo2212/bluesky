@@ -1,26 +1,25 @@
 import asyncio
-from enum import verify
-import logging
 import threading
 import msgpack
-from pydantic import BaseModel, Field, StringConstraints, ValidationError, field_validator, model_validator
 import uvicorn
 from numpy import ndarray
 from typing import Annotated, Self
-from fastapi import FastAPI, Path, Request, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException, status
+from fastapi import Body, FastAPI, Path, Request, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+# from fastapi.staticfiles import StaticFiles
+# from fastapi.templating import Jinja2Templates
 from fastapi.encoders import jsonable_encoder
+
+from starlette.middleware.sessions import SessionMiddleware
 
 from contextlib import asynccontextmanager
 
 from bluesky.network.common import genid, unpack_zmq_msgid, ws_msgid, zmq_msgid
-from bluesky.network.npcodec import encode_json, ext_hook
+from bluesky.network.npcodec import encode_json
 from bluesky.network.server_async import Server
 import bluesky as bs
 
-bs.settings.set_variable_defaults(http_host='127.0.0.1', http_port=5000)
+bs.settings.set_variable_defaults(http_host='127.0.0.1', http_port=8080)
 
 
 @asynccontextmanager
@@ -32,43 +31,66 @@ async def lifespan(app: FastAPI):
     if server.thread is None:
         server.quit()
 
-async def get_client_id(request: Request, client_id: str=''):
-    ret = genid(client_id or 'C')
-    if client_id != ret:
-        url = request.url.include_query_params(client_id=ret)
-        raise HTTPException(
-            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
-            headers={'Location': str(url)})
+async def get_client_id(session: dict, client_id: str=''):
+    ''' Get Client ID from query/path or session. '''
+    cookie_id = session.get('client_id', 'C')
+    ret = genid(client_id or cookie_id)
+    if cookie_id != ret:
+        session.update(dict(client_id=ret))
     return ret
 
 
-EnsureClientID = Annotated[str, Depends(get_client_id)]
+async def ensure_client_id(request: Request, client_id: str=''):
+    ''' Dependency to ensure that the actual client id ends up as query in the url. '''
+    s_client_id = await get_client_id(request.session, client_id)
+    if s_client_id != client_id:
+        url = request.url.include_query_params(client_id=s_client_id)
+        raise HTTPException(
+            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+            headers={'Location': str(url)})
+    return s_client_id
 
-
-# async def get_act_id(act_id: str=''):
+EnsureClientID = Annotated[str, Depends(ensure_client_id)]
 
 
 app = FastAPI(lifespan=lifespan)
-app.mount('/static', StaticFiles(directory='static'), name='static')
-templates = Jinja2Templates(directory='templates')
+app.add_middleware(
+    SessionMiddleware,
+    same_site="strict",
+    session_cookie='MY_SESSION_ID',
+    secret_key="mysecret",
+)
+# app.mount('/static', StaticFiles(directory='static'), name='static')
+# templates = Jinja2Templates(directory='templates')
+
 
 @app.get('/', response_class=HTMLResponse)
 async def root(request: Request, client_id: EnsureClientID):#, act_id: EnsureActId):
     # TODO: general bluesky landing page, different client views as plugins
-    print(f'{client_id = }')
-    return templates.TemplateResponse(name='pmtiles.html', request=request, context={'client_id': client_id})
+    return 'BlueSky server landing page under construction.'
+    # response = templates.TemplateResponse(name='pmtiles.html', request=request, context={'client_id': client_id})
+    # return response
 
-@app.get('/api/nodes/')
+@app.get('/api/nodes/', description='Retrieve the current list of simulation nodes and their status.')
 async def get_nodes():
     manager = WebServer.instance()
-    tasks = [asyncio.create_task(manager.request(node_id, 'SIMINFO'), name=node_id) for node_id in manager.sim_nodes]
+    tasks = [asyncio.create_task(manager.request(node_id, 'SIMINFO', timeout=5.0), name=node_id) for node_id in manager.sim_nodes]
     await asyncio.gather(*tasks)
     return {
         task.get_name(): task.result() for task in tasks
     }
 
+@app.put('/api/nodes/{node_id}/send/{topic}', description='Send information to a simulation node.')
+async def send_data(node_id: Annotated[str, Path(description='Network ID of the node to send data to')],
+                    topic: Annotated[str, Path(description='Topic of the data to send', pattern=r'^[A-Za-z]+$')],
+                    body: Annotated[dict, Body()]):
+    manager = WebServer.instance()
+    if node_id not in manager.sim_nodes:
+        raise HTTPException(422, f'Node with ID {node_id} does not exist, or is not connected to this server. Existing node ID\'s: {", ".join(manager.sim_nodes)}')
+    print(body)
 
-@app.get('/api/nodes/{node_id}/{topics}')
+
+@app.get('/api/nodes/{node_id}/request/{topics}', description='Request the full state for one or more topics.')
 async def request_data(node_id: Annotated[str, Path(description='Network ID of the node to get data from')],
                        topics: Annotated[str, Path(description='One or more topics to request data for, separated by commas', pattern=r'^[A-Za-z]+(?:,[A-Za-z]+)*$')],
                        timeout: Annotated[float, Query(description='Maximum number of seconds to wait for the simulation data request.', ge=0.0)] = 5.0):
@@ -107,9 +129,10 @@ class WebServer(Server):
         self.connections[client_id] = conn
         # Send subscription for direct messages
         await super().subscribe(client_id.encode('charmap'))
-        print('Sending list of current nodes to new WS client')
-        await conn.announce_joined(*self.sim_nodes)
-        # await conn.set_actnode()
+        if self.sim_nodes:
+            print('Sending list of current nodes to new WS client')
+            await conn.announce_joined(*self.sim_nodes)
+            await conn.set_actnode(self.sim_nodes[0])
         return conn
 
     async def removeConnection(self, client_id: str):
@@ -200,7 +223,7 @@ class Connection:
             self.subscriptions.remove(msgid)
             await self.manager.unsubscribe(msgid)
 
-    async def set_actnode(self, node_id: str):
+    async def set_actnode(self, node_id: str, announce=True):
         async_tasks = []
         # First remove subscriptions from previous active node and replace with new subscriptions
         if self.act_id:
@@ -216,10 +239,11 @@ class Connection:
                 self.subscriptions.add(new_sub)
                 async_tasks.append(self.manager.subscribe(new_sub))
         self.act_id = node_id
-        # Communicate to gui
-        data = msgpack.packb(node_id, use_bin_type=False)
-        if data is not None:
-            async_tasks.append(self.connection.send_bytes(ws_msgid('ACTNODE-CHANGED') + data))
+        if announce:
+            # Communicate to gui
+            data = msgpack.packb(node_id, use_bin_type=False)
+            if data is not None:
+                async_tasks.append(self.connection.send_bytes(ws_msgid('ACTNODE-CHANGED') + data))
         # Await all network I/O
         await asyncio.gather(*async_tasks)
 
@@ -244,8 +268,9 @@ class Connection:
 
 
 @app.websocket('/ws')
-async def websocket_client(websocket: WebSocket, client_id: str):
+async def websocket_client(websocket: WebSocket, client_id: str=''):
     manager = WebServer.instance()
+    client_id = await get_client_id(websocket.session, client_id)
     try:
         conn = await manager.addConnection(websocket, client_id)
         while True:
@@ -254,6 +279,8 @@ async def websocket_client(websocket: WebSocket, client_id: str):
                 await conn.subscribe(**data)
             elif topic == 'UNSUBSCRIBE':
                 await conn.unsubscribe(**data)
+            elif topic == 'ACTNODE-CHANGED':
+                await conn.set_actnode(**data, announce=False)
             else:
                 await manager.send(topic, data, to_group, client_id)
 
