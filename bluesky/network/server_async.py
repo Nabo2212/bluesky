@@ -1,4 +1,5 @@
 from collections import defaultdict
+from contextlib import suppress
 import platform
 import sys
 import os
@@ -41,7 +42,7 @@ class Server:
         self.server_id: str = genid(groupid=GROUPID_SIM, seqidx=0)
         self.bserver_id: bytes = self.server_id.encode('charmap')
         self.max_group_idx = 0
-        self.sim_nodes = set()
+        self.sim_nodes = list()
         self.all_nodes = set()
         self.avail_nodes = set()
 
@@ -185,7 +186,8 @@ class Server:
         # This is an initial client, server, or node subscription
         if node_id[0] == GROUPID_SIM and node_id in self.spawned_processes:
             # This is a node owned by this server which has successfully started.
-            self.sim_nodes.add(node_id)
+            if node_id not in self.sim_nodes:
+                self.sim_nodes.append(node_id)
             await self.send('REQUEST', ['STATECHANGE'], node_id)
     
     async def unregister_node(self, node_id: str) -> None:
@@ -194,7 +196,8 @@ class Server:
             Arguments:
             - node_id: The id of the node to unregister
         '''
-        self.sim_nodes.discard(node_id)
+        with suppress(ValueError):
+            self.sim_nodes.remove(node_id)
 
     async def loop(self) -> None:
         ''' Main server loop. '''

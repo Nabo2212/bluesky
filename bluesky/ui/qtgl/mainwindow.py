@@ -462,12 +462,12 @@ class MainWindow(QMainWindow, Base):
             self.show_doc_window(args)
 
     @subscriber(topic='SIMINFO')
-    def on_siminfo_received(self, speed, simdt, simt, simutc, ntraf, state, scenname):
-        simt = tim2txt(simt)[:-3]
-        self.setNodeInfo(ctx.sender_id, simt, scenname)
+    def on_siminfo_received(self, data):
+        simt = tim2txt(data.simt)[:-3]
+        self.setNodeInfo(ctx.sender_id, simt, data.scenname)
         if ctx.sender_id == bs.net.act_id:
             self.siminfoLabel.setText(u'<b>t:</b> %s, <b>\u0394t:</b> %.2f, <b>Speed:</b> %.1fx, <b>UTC:</b> %s, <b>Mode:</b> %s, <b>Aircraft:</b> %d, <b>Conflicts:</b> %d/%d, <b>LoS:</b> %d/%d'
-                % (simt, simdt, speed, simutc, self.modes[state], ntraf, self.nconf_cur, self.nconf_tot, self.nlos_cur, self.nlos_tot))
+                % (simt, data.simdt, data.speed, data.simutc, self.modes[data.state], data.ntraf, self.nconf_cur, self.nconf_tot, self.nlos_cur, self.nlos_tot))
 
     def setNodeInfo(self, connid, time, scenname):
         node = self.nodes.get(connid)

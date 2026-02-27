@@ -51,7 +51,7 @@ class ScreenIO(Entity):
 
         # Output event timers
         self.slow_timer = Timer(1000 // SIMINFO_RATE)
-        self.slow_timer.timeout.connect(self.send_siminfo)
+        # self.slow_timer.timeout.connect(self.send_siminfo)
         self.slow_timer.timeout.connect(self.send_route_data)
 
     def update(self):
@@ -122,14 +122,22 @@ class ScreenIO(Entity):
     # =========================================================================
     # Slots
     # =========================================================================
+    @state_publisher(topic='SIMINFO', dt=1000)
     def send_siminfo(self):
         t  = time.time()
         dt = np.maximum(t - self.prevtime, 0.00001)  # avoid divide by 0
         speed = (self.samplecount - self.prevcount) / dt * bs.sim.simdt
         self.prevtime  = t
         self.prevcount = self.samplecount
-        bs.net.send('SIMINFO', (speed, bs.sim.simdt, bs.sim.simt,
-            str(bs.sim.utc.replace(microsecond=0)), bs.traf.ntraf, bs.sim.state, stack.get_scenname()))
+        return dict(
+            speed=speed,
+            simdt=bs.sim.simdt,
+            simt=bs.sim.simt,
+            simutc=str(bs.sim.utc.replace(microsecond=0)),
+            ntraf=bs.traf.ntraf,
+            state=bs.sim.state,
+            scenname=stack.get_scenname()
+        )
         
 
     @state_publisher(topic='TRAILS', dt=1000 // SIMINFO_RATE, send_type='extend')
