@@ -40,7 +40,9 @@ class Signal(metaclass=SignalFactory):
 
     def connect(self, func):
         """ Connect a new function to this signal. """
-        self.subscribers.append(FuncObject(func))
+        fobj = FuncObject(func)
+        if fobj not in self.subscribers:
+            self.subscribers.append(fobj)
 
     def disconnect(self, func):
         """ Disconnect a function from this signal. """
