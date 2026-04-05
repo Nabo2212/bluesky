@@ -19,7 +19,7 @@ from bluesky.stack.argparser import PosArg
 from bluesky.pathfinder import ResourcePath
 from bluesky.tools.misc import tim2txt
 from bluesky.network import subscriber, context as ctx
-from bluesky.network.common import get_ownip, getseqidxfromid, genid
+from bluesky.network.common import ActionType, get_ownip, getseqidxfromid, genid
 import bluesky.network.sharedstate as ss
 
 from bluesky.ui import palette
@@ -125,6 +125,13 @@ class MainWindow(QMainWindow, Base):
     nconf_tot: ss.ActData[int] = ss.ActData(0, group='acdata')
     nlos_cur: ss.ActData[int] = ss.ActData(0, group='acdata')
     nlos_tot: ss.ActData[int] = ss.ActData(0, group='acdata')
+    ntraf: ss.ActData[int] = ss.ActData(0, group='acdata')
+
+    simt: ss.ActData[float] = ss.ActData(0.0, group='siminfo')
+    simdt: ss.ActData[float] = ss.ActData(0.0, group='siminfo')
+    speed: ss.ActData[float] = ss.ActData(0.0, group='siminfo')
+    simutc: ss.ActData[str] = ss.ActData('', group='siminfo')
+    state: ss.ActData[int] = ss.ActData(0, group='siminfo')
 
     show_map: ss.ActData[bool] = ss.ActData(True)
     show_coast: ss.ActData[bool] = ss.ActData(True)
@@ -362,17 +369,6 @@ class MainWindow(QMainWindow, Base):
             app.instance().closeAllWindows()
             # return True
 
-    @subscriber
-    def echo(self, text, flags=None, sender_id=None):
-        refnode = sender_id or ctx.sender_id or bs.net.act_id
-        # Always update the store
-        store = ss.get(refnode)
-        store.echotext.append(text)
-        store.echoflags.append(flags)
-        # Directly echo if message corresponds to active node
-        if refnode == bs.net.act_id:
-            return self.console.echo(text, flags)
-
     def changeEvent(self, event: QEvent):
         # Detect dark/light mode switch
         if event.type() == event.Type.PaletteChange and self.darkmode != isdark():
@@ -463,11 +459,14 @@ class MainWindow(QMainWindow, Base):
 
     @subscriber(topic='SIMINFO')
     def on_siminfo_received(self, data):
+        if ctx.action == ActionType.Reset:
+            return
+
         simt = tim2txt(data.simt)[:-3]
         self.setNodeInfo(ctx.sender_id, simt, data.scenname)
         if ctx.sender_id == bs.net.act_id:
             self.siminfoLabel.setText(u'<b>t:</b> %s, <b>\u0394t:</b> %.2f, <b>Speed:</b> %.1fx, <b>UTC:</b> %s, <b>Mode:</b> %s, <b>Aircraft:</b> %d, <b>Conflicts:</b> %d/%d, <b>LoS:</b> %d/%d'
-                % (simt, data.simdt, data.speed, data.simutc, self.modes[data.state], data.ntraf, self.nconf_cur, self.nconf_tot, self.nlos_cur, self.nlos_tot))
+                % (simt, self.simdt, self.speed, self.simutc, self.modes[self.state], self.ntraf, self.nconf_cur, self.nconf_tot, self.nlos_cur, self.nlos_tot))
 
     def setNodeInfo(self, connid, time, scenname):
         node = self.nodes.get(connid)

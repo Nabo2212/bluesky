@@ -9,7 +9,7 @@ from bluesky.core.signal import Signal
 from bluesky.stack.cmdparser import Command
 from bluesky.tools import cachefile
 from bluesky.tools.misc import cmdsplit
-from bluesky.network import subscribe
+from bluesky.network import subscribe, subscriber
 from bluesky.network.sharedstate import ActData, get
 from bluesky.ui.qtgl import autocomplete
 from bluesky.ui.radarclick import radarclick
@@ -55,8 +55,8 @@ class Console(QWidget):
     _instance = None
 
     # Per-remote data
-    echotext: ActData[list] = ActData()
-    echoflags: ActData[list] = ActData()
+    text: ActData[list] = ActData(group='echo')
+    flags: ActData[list] = ActData(group='echo')
     cmddict: ActData[dict] = ActData(group='stackcmds')
 
     def __init__(self, parent=None):
@@ -68,6 +68,7 @@ class Console(QWidget):
                 self.command_history = []
         self.cmd = ''
         self.args = []
+        self.echo_count = 0
         self.history_pos = 0
         self.command_mem = ''
         self.command_line = ''
@@ -86,6 +87,7 @@ class Console(QWidget):
 
         # Connect to stack command list SharedState
         subscribe('STACKCMDS')
+        subscriber(self.echo, topic='ECHO')
 
     def close(self):
         ''' Save command history when BlueSky closes. '''
@@ -93,7 +95,7 @@ class Console(QWidget):
             cache.dump(self.command_history)
 
     def actnodeChanged(self, nodeid):
-        text = ('<br>'.join(self.echotext)).replace('\n', '<br>') + '<br>'
+        text = ('<br>'.join(self.text)).replace('\n', '<br>') + '<br>'
         self.stackText.setHtml(text)
         self.stackText.verticalScrollBar().setValue(
             self.stackText.verticalScrollBar().maximum())
@@ -101,7 +103,7 @@ class Console(QWidget):
     def stack(self, text):
         # Add command to the command history
         self.command_history.append(text)
-        self.echo(text)
+        # bs.stack.echo(text)
         bs.stack.stack(text)
         cmdline_stacked.emit(self.cmd, self.args)
         # reset commandline and the autocomplete history
@@ -109,7 +111,15 @@ class Console(QWidget):
         autocomplete.reset()
         self.history_pos = 0
 
-    def echo(self, text, flags=None):
+    def echo(self, echodata):
+        if nlines_store := len(echodata.text) == 0:
+            self.stackText.setHtml('')
+            self.echo_count = 0
+            return
+
+        nnewlines = nlines_store - self.echo_count
+        text = '\n'.join(echodata.text[-nnewlines:])
+        self.echo_count = nlines_store
         cursor = self.stackText.textCursor()
         cursor.clearSelection()
         cursor.movePosition(cursor.MoveOperation.End)
