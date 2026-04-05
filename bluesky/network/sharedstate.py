@@ -6,7 +6,6 @@
 from typing import Any, Generic, TypeVar
 import numpy as np
 
-from types import SimpleNamespace
 from copy import deepcopy
 from collections import defaultdict
 
@@ -23,7 +22,7 @@ sigchanged: dict[str, signal.Signal] = dict()
 
 def reset(remote_id=None):
     ''' Reset shared state data to defaults for remote simulation. '''
-    remotes[remote_id or bs.net.act_id] = _genstore()
+    remotes[remote_id or bs.net.act_id] = _genstore(remote_id or bs.net.act_id)
 
     # If this is the active node, also emit a signal about this change
     if ctx.sender_id == bs.net.act_id:
@@ -54,24 +53,19 @@ def on_sharedstate_received(action, data):
     ctx.action_content = data
 
     if ctx.action == ActionType.Update:
-        store.update(data)
+        store.update(**data)
 
     elif ctx.action == ActionType.Append:
-        store.append(data)
+        store.append(**data)
 
     elif ctx.action == ActionType.Extend:
-        store.extend(data)
+        store.extend(**data)
 
     elif ctx.action == ActionType.Replace:
-        store.replace(data)
+        store.replace(**data)
 
     elif ctx.action == ActionType.Delete:
-        store.delete(data)
-
-    # Inform subscribers of state update
-    # TODO: what to do with act vs all?
-    if ctx.sender_id == bs.net.act_id:
-        sigchanged[ctx.topic.lower()].emit(store)
+        store.delete(**data)
 
     # Reset context variables
     ctx.action = ActionType.NoAction
@@ -82,9 +76,11 @@ def get(remote_id=None, group=None):
     ''' Retrieve a remote store, or a group in a remote store.
         Returns the store of the active remote if no remote id is provided.
     '''
-    return (remotes[remote_id or bs.net.act_id] if group is None else
-            getattr(remotes[remote_id or bs.net.act_id], group))
-
+    if group is None:
+        return remotes[remote_id or bs.net.act_id]
+    elif not is_sharedstate(group):
+        addtopic(group)
+    return getattr(remotes[remote_id or bs.net.act_id], group)
 
 def setvalue(name, value, remote_id=None, group=None):
     ''' Set the value of attribute 'name' in group 'group' for remote store with id 'remote_id' 
@@ -126,11 +122,11 @@ def addtopic(topic: str) -> signal.Signal:
     # No creation needed if topic is already known
     if not hasattr(defaults, topic):
         # Add store to the defaults
-        setattr(defaults, topic, Store())
+        setattr(defaults, topic, Store(group=topic))
 
         # Also add to existing stores if necessary
-        for remote in remotes.values():
-            setattr(remote, topic, Store())
+        for remote_id, remote in remotes.items():
+            setattr(remote, topic, Store(group=topic, remote_id=remote_id))
 
     return sig
 
@@ -140,13 +136,29 @@ def is_sharedstate(topic):
     return topic.lower() in sigchanged
 
 
-class Store(SimpleNamespace):
+class Store:
     ''' Simple storage object for nested storage of state data per simulation node. '''
+    def __init__(self, group='', remote_id='') -> None:
+        self._remote_id = remote_id
+        self.group = group.lower()
+
+    def set_remote_id(self, remote_id):
+        ''' Set the remote id for this sharedstate store and its children. '''
+        self._remote_id = remote_id
+        for child in self.__dict__.values():
+            if isinstance(child, Store):
+                child.set_remote_id(remote_id)
+
+    def notify_changed(self):
+        ''' Emit signal that the contents of this store were updated. '''
+        if self._remote_id == bs.net.act_id:
+            sigchanged[self.group].emit(self)
+
     def valid(self):
         ''' Return True if this store has initialised attributes.'''
         return all([bool(v) for v in vars(self).values()] or [False])
 
-    def update(self, data):
+    def update(self, **data):
         ''' Update a value in this store. '''
         for key, item in data.items():
             container = getattr(self, key, None)
@@ -157,17 +169,23 @@ class Store(SimpleNamespace):
             else:
                 for idx, value in item.items():
                     container[idx] = value
+        # Notify subscribers of change
+        self.notify_changed()
 
-    def append(self, data):
+    def append(self, **data):
         ''' Append data to (lists/arrays in) this store. '''
         for key, item in data.items():
             container = getattr(self, key, None)
             if container is None:
                 setattr(self, key, [item])
+            elif isinstance(container, list):
+                container.append(item)
             elif isinstance(container, np.ndarray):
                 setattr(self, key, np.append(container, item))
+        # Notify subscribers of change
+        self.notify_changed()
 
-    def extend(self, data):
+    def extend(self, **data):
         ''' Extend data in (lists/arrays in) this store. '''
         for key, item in data.items():
             container = getattr(self, key, None)
@@ -177,12 +195,16 @@ class Store(SimpleNamespace):
                 container.extend(item)
             elif isinstance(container, np.ndarray):
                 setattr(self, key, np.concatenate([container, item]))
+        # Notify subscribers of change
+        self.notify_changed()
 
-    def replace(self, data):
+    def replace(self, **data):
         ''' Replace data containers in this store. '''
         vars(self).update(data)
+        # Notify subscribers of change
+        self.notify_changed()
 
-    def delete(self, data):
+    def delete(self, **data):
         ''' Delete data from this store. '''
         # We are expecting either an index, or a key value from a reference variable
         for key, item in data.items():
@@ -226,7 +248,8 @@ class Store(SimpleNamespace):
                         # Assume a tuple or list
                         for iidx in reversed(sorted(idx)):
                             container.pop(iidx)
-
+        # Notify subscribers of change
+        self.notify_changed()
 
 # Type template variable for ActData accessor class
 T = TypeVar('T')
@@ -294,9 +317,10 @@ def _recursive_update(target, source):
         target[k] = v
 
 
-def _genstore():
+def _genstore(remote_id):
     ''' Generate a store object for a remote simulation from defaults. '''
     store = deepcopy(defaults)
+    store.set_remote_id(remote_id)
     return store
 
 
@@ -304,5 +328,12 @@ def _genstore():
 # These always need to be stored per remote node.
 defaults = Store()
 
+class remoteDict(defaultdict):
+    ''' Implementation of defaultdict that uses each key also as construction argument of stored item. '''
+    def __missing__(self, key: Any) -> Any:
+        store = _genstore(key)
+        self.update({key: store})
+        return store
+
 # Keep a dict of remote state storage namespaces
-remotes = defaultdict(_genstore)
+remotes = remoteDict()
