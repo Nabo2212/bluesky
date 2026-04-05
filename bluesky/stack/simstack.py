@@ -3,6 +3,7 @@ from pathlib import Path
 import traceback
 
 import bluesky as bs
+from bluesky.network import StatePublisher
 from bluesky.stack.stackbase import Stack, stack, checkscen, forward
 from bluesky.stack.cmdparser import Command, command
 from bluesky.stack.basecmds import initbasecmds
@@ -18,6 +19,9 @@ settings.set_variable_defaults(start_location="EHAM", scenario_path="scenario")
 tmxlist = ("BGPASAS", "DFFLEVEL", "FFLEVEL", "FILTCONF", "FILTTRED", "FILTTAMB",
            "GRAB", "HDGREF", "MOVIE", "NAVDB", "PREDASAS", "RENAME", "RETYPE",
            "SWNLRPASAS", "TRAFRECDT", "TRAFLOGDT", "TREACT", "WINDGRID")
+
+# Echo message publisher and message store
+_echo_pub = StatePublisher('ECHO')
 
 
 def init():
@@ -247,7 +251,9 @@ def echo(text='', flags=0, to_group=''):
 
             Simulation-side implementation of ECHO sends echo message on to client.    
         '''
-        bs.net.send('ECHO', dict(text=text, flags=flags), to_group=to_group)
+        print('publishing', text)
+        _echo_pub.send_append(to_group=to_group, text=text, flags=flags)
+        # bs.net.send('ECHO', dict(text=text, flags=flags), to_group=to_group)
 
 
 @command(name='INSEDIT')

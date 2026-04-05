@@ -136,6 +136,7 @@ class ScreenIO(Entity):
             simutc=str(bs.sim.utc.replace(microsecond=0)),
             ntraf=bs.traf.ntraf,
             state=bs.sim.state,
+            ff=bs.sim.ffmode,
             scenname=stack.get_scenname()
         )
         

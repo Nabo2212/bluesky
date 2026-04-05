@@ -4,14 +4,11 @@ import traceback
 import math
 
 import bluesky as bs
+from bluesky.network import sharedstate as ss
 from bluesky.core.signal import Signal
 from bluesky.stack.stackbase import Stack, forward, stack
 from bluesky.stack.cmdparser import Command, command, commandgroup
 from bluesky.stack import argparser
-
-
-# Globals
-_sig_echo = Signal('echo')
 
 
 def init():
@@ -90,13 +87,14 @@ def process():
 
 @command(annotations='string')
 def echo(text='', flags=0, sender_id=None):
-        ''' Echo
+    ''' Echo
 
-            Clien-side implementation of ECHO emits the same
-            signal as the one triggered by incoming echo
-            messages.    
-        '''
-        _sig_echo.emit(text, flags, sender_id)
+        Clien-side implementation of ECHO emits the same
+        signal as the one triggered by incoming echo
+        messages.    
+    '''
+    store = ss.get(sender_id, group='echo')
+    store.append(text=text, flags=flags)
 
 
 @commandgroup(name='HELP', aliases=('?',))
