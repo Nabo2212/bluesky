@@ -6,8 +6,8 @@ from numpy import ndarray
 from typing import Annotated, Self
 from fastapi import Body, FastAPI, Path, Request, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse
-# from fastapi.staticfiles import StaticFiles
-# from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from fastapi.encoders import jsonable_encoder
 
 from starlette.middleware.sessions import SessionMiddleware
@@ -60,8 +60,8 @@ app.add_middleware(
     session_cookie='MY_SESSION_ID',
     secret_key="mysecret",
 )
-# app.mount('/static', StaticFiles(directory='static'), name='static')
-# templates = Jinja2Templates(directory='templates')
+app.mount('/static', StaticFiles(directory='static'), name='static')
+templates = Jinja2Templates(directory='templates')
 
 
 @app.get('/', response_class=HTMLResponse)
@@ -197,6 +197,7 @@ class Connection:
         self.connection = connection
         self.manager = manager
         self.client_id = client_id
+        self.bclient_id = client_id.encode('charmap')
         self.act_id = ''
         self.act_subscriptions: set[bytes] = set()
         self.subscriptions: set[bytes] = set()  # topics
@@ -258,7 +259,7 @@ class Connection:
             await self.connection.send_bytes(ws_msgid('NODE-REMOVED') + data)
 
     async def send(self, msgid: bytes, data: bytes):
-        if any(msgid.startswith(sub) for sub in self.subscriptions):
+        if any(msgid.startswith(sub) for sub in self.subscriptions) or msgid.startswith(self.bclient_id):
             # Convert zmq_msgid to ws_msgid
             msgid = ws_msgid(*unpack_zmq_msgid(msgid))
             try:
